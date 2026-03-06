@@ -365,7 +365,7 @@ end
 local mouse = player:GetMouse()
 
 connect(UIS.InputBegan, function(input, gameProcessed)
-	if not running or gameProcessed or cameraMode then return end
+	if not running or gameProcessed then return end
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
 	local target = mouse.Target
