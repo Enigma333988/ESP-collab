@@ -51,7 +51,7 @@ topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -152, 1, 0)
+title.Size = UDim2.new(1, -352, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamSemibold
@@ -76,6 +76,38 @@ cameraBtn.Parent = topBar
 local cameraCorner = Instance.new("UICorner")
 cameraCorner.CornerRadius = UDim.new(0, 8)
 cameraCorner.Parent = cameraBtn
+
+local xyzBtn = Instance.new("TextButton")
+xyzBtn.Name = "XYZ"
+xyzBtn.Size = UDim2.fromOffset(50, 26)
+xyzBtn.Position = UDim2.new(1, -180, 0.5, -13)
+xyzBtn.BackgroundColor3 = Color3.fromRGB(85, 85, 150)
+xyzBtn.BorderSizePixel = 0
+xyzBtn.Font = Enum.Font.GothamSemibold
+xyzBtn.TextSize = 13
+xyzBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+xyzBtn.Text = "XYZ"
+xyzBtn.Parent = topBar
+
+local xyzCorner = Instance.new("UICorner")
+xyzCorner.CornerRadius = UDim.new(0, 8)
+xyzCorner.Parent = xyzBtn
+
+local teleportBtn = Instance.new("TextButton")
+teleportBtn.Name = "Teleport"
+teleportBtn.Size = UDim2.fromOffset(86, 26)
+teleportBtn.Position = UDim2.new(1, -272, 0.5, -13)
+teleportBtn.BackgroundColor3 = Color3.fromRGB(135, 95, 45)
+teleportBtn.BorderSizePixel = 0
+teleportBtn.Font = Enum.Font.GothamSemibold
+teleportBtn.TextSize = 13
+teleportBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+teleportBtn.Text = "Телепорт"
+teleportBtn.Parent = topBar
+
+local teleportCorner = Instance.new("UICorner")
+teleportCorner.CornerRadius = UDim.new(0, 8)
+teleportCorner.Parent = teleportBtn
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Name = "Close"
@@ -164,6 +196,42 @@ local hiddenGuiStates = {}
 local savedCameraType = camera.CameraType
 local savedCameraCF = camera.CFrame
 
+local function formatCameraCFrame(cf)
+	local p = cf.Position
+	local lv = cf.LookVector
+	return string.format(
+		"CFrame.new(%.3f, %.3f, %.3f) * CFrame.fromMatrix(Vector3.zero, Vector3.new(%.6f, %.6f, %.6f), Vector3.new(%.6f, %.6f, %.6f), Vector3.new(%.6f, %.6f, %.6f))",
+		p.X, p.Y, p.Z,
+		cf.XVector.X, cf.XVector.Y, cf.XVector.Z,
+		cf.YVector.X, cf.YVector.Y, cf.YVector.Z,
+		cf.ZVector.X, cf.ZVector.Y, cf.ZVector.Z
+	), string.format("LookVector: Vector3.new(%.4f, %.4f, %.4f)", lv.X, lv.Y, lv.Z)
+end
+
+local function copyText(text)
+	if typeof(setclipboard) == "function" then
+		setclipboard(text)
+		return true
+	end
+	if typeof(toclipboard) == "function" then
+		toclipboard(text)
+		return true
+	end
+	if typeof(clipboard_set) == "function" then
+		clipboard_set(text)
+		return true
+	end
+	return false
+end
+
+local function getRootPart()
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	return character:FindFirstChild("HumanoidRootPart")
+end
+
 local function setServerUiVisible(visible)
 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
 	if not playerGui then return end
@@ -248,6 +316,28 @@ connect(cameraBtn.MouseButton1Click, function()
 	else
 		startCameraMode()
 	end
+end)
+
+connect(xyzBtn.MouseButton1Click, function()
+	if not running then return end
+	local cframeText, lookText = formatCameraCFrame(camera.CFrame)
+	local copied = copyText(cframeText)
+	local status = copied and "Скопировано в буфер." or "Буфер недоступен, скопируй вручную."
+	openWindow(cframeText .. "\n" .. lookText .. "\n" .. status, "Camera XYZ")
+end)
+
+connect(teleportBtn.MouseButton1Click, function()
+	if not running then return end
+	local root = getRootPart()
+	if not root then
+		openWindow("Не найден HumanoidRootPart. Персонаж не загружен.", "Телепорт")
+		return
+	end
+	root.CFrame = camera.CFrame
+	if cameraMode then
+		stopCameraMode()
+	end
+	openWindow("Телепорт выполнен в позицию камеры.", "Телепорт")
 end)
 
 -- Перетаскивание окна
