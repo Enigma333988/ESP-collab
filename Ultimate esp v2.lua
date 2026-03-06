@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -12,14 +13,17 @@ local SETTINGS = {
     Enabled = true,
     TeamCheck = true,
 
-    MaxLockDistance = 220,      -- studs
+    MaxLockDistance = 10,       -- studs (about requested 10m/studs radius)
     ReacquireInterval = 0.03,   -- fast target refresh (~33 times/sec)
     RotateOnRenderStepped = true,
     AlsoAimCamera = true,       -- keep camera looking at locked enemy too
+    HoldKey = Enum.KeyCode.C,
 }
 
 local currentTargetPlayer = nil
 local reacquireClock = 0
+
+local holdActive = false
 
 local function isAlive(character)
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -108,7 +112,7 @@ local function faceTarget(localRoot, targetRoot)
 end
 
 local function stepLock(deltaTime)
-    if not SETTINGS.Enabled then
+    if not SETTINGS.Enabled or not holdActive then
         currentTargetPlayer = nil
         return
     end
@@ -139,10 +143,27 @@ local function stepLock(deltaTime)
     faceTarget(localRoot, targetRoot)
 end
 
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
+    end
+
+    if input.KeyCode == SETTINGS.HoldKey then
+        holdActive = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == SETTINGS.HoldKey then
+        holdActive = false
+        currentTargetPlayer = nil
+    end
+end)
+
 if SETTINGS.RotateOnRenderStepped then
     RunService.RenderStepped:Connect(stepLock)
 else
     RunService.Heartbeat:Connect(stepLock)
 end
 
-print("[Ultimate ESP v2] nearest enemy lock loaded")
+print("[Ultimate ESP v2] nearest enemy lock loaded (hold C)")
