@@ -51,7 +51,7 @@ topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -352, 1, 0)
+title.Size = UDim2.new(1, -426, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamSemibold
@@ -108,6 +108,22 @@ teleportBtn.Parent = topBar
 local teleportCorner = Instance.new("UICorner")
 teleportCorner.CornerRadius = UDim.new(0, 8)
 teleportCorner.Parent = teleportBtn
+
+local wingsBtn = Instance.new("TextButton")
+wingsBtn.Name = "Wings"
+wingsBtn.Size = UDim2.fromOffset(64, 26)
+wingsBtn.Position = UDim2.new(1, -342, 0.5, -13)
+wingsBtn.BackgroundColor3 = Color3.fromRGB(95, 55, 145)
+wingsBtn.BorderSizePixel = 0
+wingsBtn.Font = Enum.Font.GothamSemibold
+wingsBtn.TextSize = 13
+wingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+wingsBtn.Text = "Крылья"
+wingsBtn.Parent = topBar
+
+local wingsCorner = Instance.new("UICorner")
+wingsCorner.CornerRadius = UDim.new(0, 8)
+wingsCorner.Parent = wingsBtn
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Name = "Close"
@@ -191,10 +207,24 @@ local cameraMove = {
 	A = false,
 	S = false,
 	D = false,
+	Shift = false,
 }
 local hiddenGuiStates = {}
 local savedCameraType = camera.CameraType
 local savedCameraCF = camera.CFrame
+
+local flyMode = false
+local flyMove = {
+	W = false,
+	A = false,
+	S = false,
+	D = false,
+	Up = false,
+	Down = false,
+	Shift = false,
+}
+local flyVelocity
+local flyGyro
 
 local function formatCameraCFrame(cf)
 	local p = cf.Position
@@ -230,6 +260,63 @@ local function getRootPart()
 		return nil
 	end
 	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function stopFlyMode()
+	if not flyMode then return end
+	flyMode = false
+	flyMove.W = false
+	flyMove.A = false
+	flyMove.S = false
+	flyMove.D = false
+	flyMove.Up = false
+	flyMove.Down = false
+	flyMove.Shift = false
+	wingsBtn.Text = "Крылья"
+	wingsBtn.BackgroundColor3 = Color3.fromRGB(95, 55, 145)
+	if flyVelocity and flyVelocity.Parent then
+		flyVelocity:Destroy()
+	end
+	if flyGyro and flyGyro.Parent then
+		flyGyro:Destroy()
+	end
+	flyVelocity = nil
+	flyGyro = nil
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = false
+	end
+end
+
+local function startFlyMode()
+	if flyMode or not running then return end
+	local root = getRootPart()
+	if not root then
+		openWindow("Не найден HumanoidRootPart. Персонаж не загружен.", "Крылья")
+		return
+	end
+	flyMode = true
+	wingsBtn.Text = "Крылья: ON"
+	wingsBtn.BackgroundColor3 = Color3.fromRGB(140, 75, 210)
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = true
+	end
+
+	flyVelocity = Instance.new("BodyVelocity")
+	flyVelocity.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+	flyVelocity.P = 1e4
+	flyVelocity.Velocity = Vector3.zero
+	flyVelocity.Parent = root
+
+	flyGyro = Instance.new("BodyGyro")
+	flyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+	flyGyro.P = 2e4
+	flyGyro.CFrame = root.CFrame
+	flyGyro.Parent = root
 end
 
 local function setServerUiVisible(visible)
@@ -287,6 +374,7 @@ local function shutdownScript()
 	if not running then return end
 	running = false
 	stopCameraMode()
+	stopFlyMode()
 	for _, c in ipairs(connections) do
 		if c and c.Connected then
 			c:Disconnect()
@@ -338,6 +426,15 @@ connect(teleportBtn.MouseButton1Click, function()
 		stopCameraMode()
 	end
 	openWindow("Телепорт выполнен в позицию камеры.", "Телепорт")
+end)
+
+connect(wingsBtn.MouseButton1Click, function()
+	if not running then return end
+	if flyMode then
+		stopFlyMode()
+	else
+		startFlyMode()
+	end
 end)
 
 -- Перетаскивание окна
@@ -466,12 +563,28 @@ connect(UIS.InputBegan, function(input, gameProcessed)
 end)
 
 connect(UIS.InputBegan, function(input, gameProcessed)
-	if not running or gameProcessed or not cameraMode then return end
+	if not running or gameProcessed or (not cameraMode and not flyMode) then return end
 
 	if input.KeyCode == Enum.KeyCode.W then cameraMove.W = true end
 	if input.KeyCode == Enum.KeyCode.A then cameraMove.A = true end
 	if input.KeyCode == Enum.KeyCode.S then cameraMove.S = true end
 	if input.KeyCode == Enum.KeyCode.D then cameraMove.D = true end
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		cameraMove.Shift = true
+		if flyMode then
+			flyMove.Shift = true
+		end
+	end
+	if flyMode then
+		if input.KeyCode == Enum.KeyCode.W then flyMove.W = true end
+		if input.KeyCode == Enum.KeyCode.A then flyMove.A = true end
+		if input.KeyCode == Enum.KeyCode.S then flyMove.S = true end
+		if input.KeyCode == Enum.KeyCode.D then flyMove.D = true end
+		if input.KeyCode == Enum.KeyCode.Space then flyMove.Up = true end
+		if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+			flyMove.Down = true
+		end
+	end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		rotateActive = true
@@ -481,12 +594,26 @@ connect(UIS.InputBegan, function(input, gameProcessed)
 end)
 
 connect(UIS.InputEnded, function(input)
-	if not running or not cameraMode then return end
+	if not running or (not cameraMode and not flyMode) then return end
 
 	if input.KeyCode == Enum.KeyCode.W then cameraMove.W = false end
 	if input.KeyCode == Enum.KeyCode.A then cameraMove.A = false end
 	if input.KeyCode == Enum.KeyCode.S then cameraMove.S = false end
 	if input.KeyCode == Enum.KeyCode.D then cameraMove.D = false end
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		cameraMove.Shift = false
+		flyMove.Shift = false
+	end
+	if flyMode then
+		if input.KeyCode == Enum.KeyCode.W then flyMove.W = false end
+		if input.KeyCode == Enum.KeyCode.A then flyMove.A = false end
+		if input.KeyCode == Enum.KeyCode.S then flyMove.S = false end
+		if input.KeyCode == Enum.KeyCode.D then flyMove.D = false end
+		if input.KeyCode == Enum.KeyCode.Space then flyMove.Up = false end
+		if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
+			flyMove.Down = false
+		end
+	end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		rotateActive = false
@@ -505,20 +632,44 @@ connect(UIS.InputChanged, function(input)
 end)
 
 connect(RunService.RenderStepped, function(dt)
-	if not running or not cameraMode then return end
+	if not running then return end
 
-	local move = Vector3.zero
-	if cameraMove.W then move += Vector3.new(0, 0, -1) end
-	if cameraMove.S then move += Vector3.new(0, 0, 1) end
-	if cameraMove.A then move += Vector3.new(-1, 0, 0) end
-	if cameraMove.D then move += Vector3.new(1, 0, 0) end
+	if cameraMode then
+		local move = Vector3.zero
+		if cameraMove.W then move += Vector3.new(0, 0, -1) end
+		if cameraMove.S then move += Vector3.new(0, 0, 1) end
+		if cameraMove.A then move += Vector3.new(-1, 0, 0) end
+		if cameraMove.D then move += Vector3.new(1, 0, 0) end
 
-	local rotation = CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
-	local speed = 32
-	local pos = camera.CFrame.Position
-	if move.Magnitude > 0 then
-		move = move.Unit * speed * dt
-		pos = pos + rotation:VectorToWorldSpace(move)
+		local rotation = CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
+		local speed = cameraMove.Shift and 96 or 32
+		local pos = camera.CFrame.Position
+		if move.Magnitude > 0 then
+			move = move.Unit * speed * dt
+			pos = pos + rotation:VectorToWorldSpace(move)
+		end
+		camera.CFrame = CFrame.new(pos) * rotation
 	end
-	camera.CFrame = CFrame.new(pos) * rotation
+
+	if flyMode then
+		local root = getRootPart()
+		if not root or not flyVelocity or not flyGyro then
+			stopFlyMode()
+			return
+		end
+		local dir = Vector3.zero
+		if flyMove.W then dir += Vector3.new(0, 0, -1) end
+		if flyMove.S then dir += Vector3.new(0, 0, 1) end
+		if flyMove.A then dir += Vector3.new(-1, 0, 0) end
+		if flyMove.D then dir += Vector3.new(1, 0, 0) end
+		if flyMove.Up then dir += Vector3.new(0, 1, 0) end
+		if flyMove.Down then dir += Vector3.new(0, -1, 0) end
+
+		local speed = flyMove.Shift and 120 or 40
+		if dir.Magnitude > 0 then
+			dir = dir.Unit
+		end
+		flyVelocity.Velocity = camera.CFrame:VectorToWorldSpace(dir) * speed
+		flyGyro.CFrame = CFrame.new(root.Position, root.Position + camera.CFrame.LookVector)
+	end
 end)
