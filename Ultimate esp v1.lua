@@ -18,23 +18,33 @@ local SETTINGS = {
     OutlineTransparency = 0,
     DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
 
+    ShowInfo = true,
+    InfoTextColor = Color3.fromRGB(255, 255, 255),
+    InfoTextSize = 13,
+    MaxInfoDistance = 5000,
+
     AssistEnabled = true,
     AssistHoldMouseButton2 = true,
     MinRadius = 30,
     MaxRadius = 350,
     CaptureRadius = 130,
+
+    RefreshInterval = 0.12,
 }
 
 local highlights = {}
+local infoBillboards = {}
 local trackedConnections = {}
 
 local aimHoldingRMB = false
 local draggingSlider = false
+local refreshAccumulator = 0
 
 local uiRefs = {
     toggleEspButton = nil,
     toggleTeamButton = nil,
     toggleAssistButton = nil,
+    toggleInfoButton = nil,
     radiusLabel = nil,
     sliderBar = nil,
     sliderFill = nil,
@@ -44,22 +54,6 @@ local uiRefs = {
 
 local function getCurrentCamera()
     return Workspace.CurrentCamera
-end
-
-local function isEnemy(player)
-    if player == LocalPlayer then
-        return false
-    end
-
-    if not SETTINGS.TeamCheck then
-        return true
-    end
-
-    if LocalPlayer.Team == nil or player.Team == nil then
-        return true
-    end
-
-    return player.Team ~= LocalPlayer.Team
 end
 
 local function getCharacter(player)
@@ -84,12 +78,40 @@ local function isAlive(character)
     return humanoid and humanoid.Health > 0
 end
 
+local function isEnemy(player)
+    if player == LocalPlayer then
+        return false
+    end
+
+    if not SETTINGS.TeamCheck then
+        return true
+    end
+
+    if LocalPlayer.Team == nil or player.Team == nil then
+        return true
+    end
+
+    return player.Team ~= LocalPlayer.Team
+end
+
 local function getHead(character)
-    if not character then
+    return character and character:FindFirstChild("Head")
+end
+
+local function getRoot(character)
+    return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getDistanceToCharacter(character)
+    local localCharacter = getCharacter(LocalPlayer)
+    local localRoot = getRoot(localCharacter)
+    local targetRoot = getRoot(character)
+
+    if not localRoot or not targetRoot then
         return nil
     end
 
-    return character:FindFirstChild("Head")
+    return (targetRoot.Position - localRoot.Position).Magnitude
 end
 
 local function cleanupHighlight(player)
@@ -100,15 +122,83 @@ local function cleanupHighlight(player)
     end
 end
 
-local function applyHighlight(player)
+local function cleanupInfo(player)
+    local billboard = infoBillboards[player]
+    if billboard then
+        billboard:Destroy()
+        infoBillboards[player] = nil
+    end
+end
+
+local function cleanupVisuals(player)
+    cleanupHighlight(player)
+    cleanupInfo(player)
+end
+
+local function ensureInfoBillboard(player, character)
+    if not SETTINGS.ShowInfo then
+        cleanupInfo(player)
+        return
+    end
+
+    local head = getHead(character)
+    if not head then
+        cleanupInfo(player)
+        return
+    end
+
+    local billboard = infoBillboards[player]
+    if not billboard then
+        billboard = Instance.new("BillboardGui")
+        billboard.Name = "EnemyInfo"
+        billboard.Size = UDim2.fromOffset(160, 34)
+        billboard.StudsOffset = Vector3.new(0, -3.2, 0) -- under silhouette / character center
+        billboard.AlwaysOnTop = true
+
+        local text = Instance.new("TextLabel")
+        text.Name = "InfoLabel"
+        text.BackgroundTransparency = 1
+        text.Size = UDim2.fromScale(1, 1)
+        text.Font = Enum.Font.GothamBold
+        text.TextScaled = false
+        text.TextWrapped = true
+        text.Parent = billboard
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 1.4
+        stroke.Color = Color3.fromRGB(0, 0, 0)
+        stroke.Transparency = 0.2
+        stroke.Parent = text
+
+        infoBillboards[player] = billboard
+    end
+
+    billboard.Parent = character
+    billboard.Adornee = head
+
+    local label = billboard:FindFirstChild("InfoLabel")
+    if label then
+        local distance = getDistanceToCharacter(character)
+        if distance and distance <= SETTINGS.MaxInfoDistance then
+            label.Visible = true
+            label.TextColor3 = SETTINGS.InfoTextColor
+            label.TextSize = SETTINGS.InfoTextSize
+            label.Text = string.format("%s\n%dm", player.Name, math.floor(distance + 0.5))
+        else
+            label.Visible = false
+        end
+    end
+end
+
+local function applyVisuals(player)
     if not SETTINGS.ESPEnabled or not isEnemy(player) then
-        cleanupHighlight(player)
+        cleanupVisuals(player)
         return
     end
 
     local character = getCharacter(player)
     if not character or not isAlive(character) then
-        cleanupHighlight(player)
+        cleanupVisuals(player)
         return
     end
 
@@ -132,18 +222,26 @@ local function applyHighlight(player)
 
     highlight.FillColor = color
     highlight.OutlineColor = color
+
+    ensureInfoBillboard(player, character)
 end
 
-local function refreshAllHighlights()
+local function refreshAllVisuals()
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            applyHighlight(player)
+            applyVisuals(player)
         end
     end
 
     for player in pairs(highlights) do
         if player.Parent == nil then
-            cleanupHighlight(player)
+            cleanupVisuals(player)
+        end
+    end
+
+    for player in pairs(infoBillboards) do
+        if player.Parent == nil then
+            cleanupVisuals(player)
         end
     end
 end
@@ -267,22 +365,22 @@ local function trackPlayer(player)
     trackedConnections[player] = {
         player.CharacterAdded:Connect(function()
             task.wait(0.1)
-            applyHighlight(player)
+            applyVisuals(player)
         end),
         player.CharacterRemoving:Connect(function()
-            cleanupHighlight(player)
+            cleanupVisuals(player)
         end),
         player:GetPropertyChangedSignal("Team"):Connect(function()
-            refreshAllHighlights()
+            refreshAllVisuals()
         end),
     }
 
-    applyHighlight(player)
+    applyVisuals(player)
 end
 
 local function cleanupPlayer(player)
     disconnectPlayerConnections(player)
-    cleanupHighlight(player)
+    cleanupVisuals(player)
 end
 
 local function createUi()
@@ -294,8 +392,8 @@ local function createUi()
 
     local panel = Instance.new("Frame")
     panel.Name = "Panel"
-    panel.Size = UDim2.new(0, 250, 0, 230)
-    panel.Position = UDim2.new(0, 20, 0.5, -115)
+    panel.Size = UDim2.new(0, 250, 0, 262)
+    panel.Position = UDim2.new(0, 20, 0.5, -131)
     panel.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     panel.BorderSizePixel = 0
     panel.Parent = screenGui
@@ -335,11 +433,12 @@ local function createUi()
     uiRefs.toggleEspButton = createToggleButton("ToggleESP", 36)
     uiRefs.toggleTeamButton = createToggleButton("ToggleTeam", 68)
     uiRefs.toggleAssistButton = createToggleButton("ToggleAssist", 100)
+    uiRefs.toggleInfoButton = createToggleButton("ToggleInfo", 132)
 
     uiRefs.radiusLabel = Instance.new("TextLabel")
     uiRefs.radiusLabel.BackgroundTransparency = 1
     uiRefs.radiusLabel.Size = UDim2.new(1, -20, 0, 20)
-    uiRefs.radiusLabel.Position = UDim2.new(0, 10, 0, 136)
+    uiRefs.radiusLabel.Position = UDim2.new(0, 10, 0, 170)
     uiRefs.radiusLabel.Font = Enum.Font.Gotham
     uiRefs.radiusLabel.TextSize = 13
     uiRefs.radiusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
@@ -348,7 +447,7 @@ local function createUi()
 
     uiRefs.sliderBar = Instance.new("Frame")
     uiRefs.sliderBar.Size = UDim2.new(1, -20, 0, 10)
-    uiRefs.sliderBar.Position = UDim2.new(0, 10, 0, 162)
+    uiRefs.sliderBar.Position = UDim2.new(0, 10, 0, 196)
     uiRefs.sliderBar.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
     uiRefs.sliderBar.BorderSizePixel = 0
     uiRefs.sliderBar.Parent = panel
@@ -382,7 +481,7 @@ local function createUi()
     local hint = Instance.new("TextLabel")
     hint.BackgroundTransparency = 1
     hint.Size = UDim2.new(1, -20, 0, 16)
-    hint.Position = UDim2.new(0, 10, 0, 182)
+    hint.Position = UDim2.new(0, 10, 0, 216)
     hint.Font = Enum.Font.Gotham
     hint.TextSize = 12
     hint.TextColor3 = Color3.fromRGB(170, 170, 170)
@@ -418,13 +517,13 @@ local function createUi()
     uiRefs.toggleEspButton.MouseButton1Click:Connect(function()
         SETTINGS.ESPEnabled = not SETTINGS.ESPEnabled
         updateToggleButton(uiRefs.toggleEspButton, "ESP", SETTINGS.ESPEnabled)
-        refreshAllHighlights()
+        refreshAllVisuals()
     end)
 
     uiRefs.toggleTeamButton.MouseButton1Click:Connect(function()
         SETTINGS.TeamCheck = not SETTINGS.TeamCheck
         updateToggleButton(uiRefs.toggleTeamButton, "TeamCheck", SETTINGS.TeamCheck)
-        refreshAllHighlights()
+        refreshAllVisuals()
     end)
 
     uiRefs.toggleAssistButton.MouseButton1Click:Connect(function()
@@ -433,9 +532,16 @@ local function createUi()
         updateRadiusUI()
     end)
 
+    uiRefs.toggleInfoButton.MouseButton1Click:Connect(function()
+        SETTINGS.ShowInfo = not SETTINGS.ShowInfo
+        updateToggleButton(uiRefs.toggleInfoButton, "Info", SETTINGS.ShowInfo)
+        refreshAllVisuals()
+    end)
+
     updateToggleButton(uiRefs.toggleEspButton, "ESP", SETTINGS.ESPEnabled)
     updateToggleButton(uiRefs.toggleTeamButton, "TeamCheck", SETTINGS.TeamCheck)
     updateToggleButton(uiRefs.toggleAssistButton, "Assist", SETTINGS.AssistEnabled)
+    updateToggleButton(uiRefs.toggleInfoButton, "Info", SETTINGS.ShowInfo)
     updateRadiusUI()
 end
 
@@ -449,7 +555,7 @@ Players.PlayerAdded:Connect(trackPlayer)
 Players.PlayerRemoving:Connect(cleanupPlayer)
 
 LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
-    refreshAllHighlights()
+    refreshAllVisuals()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
@@ -478,8 +584,13 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-RunService.RenderStepped:Connect(function()
-    refreshAllHighlights()
+RunService.RenderStepped:Connect(function(deltaTime)
+    refreshAccumulator += deltaTime
+    if refreshAccumulator >= SETTINGS.RefreshInterval then
+        refreshAccumulator = 0
+        refreshAllVisuals()
+    end
+
     updateRadiusUI()
     updateAssist()
 end)
