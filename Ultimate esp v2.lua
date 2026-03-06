@@ -225,6 +225,8 @@ local flyMove = {
 }
 local flyVelocity
 local flyGyro
+local flyTargetPart
+local flyTargetHumanoid
 
 local function formatCameraCFrame(cf)
 	local p = cf.Position
@@ -262,6 +264,27 @@ local function getRootPart()
 	return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function resolveFlyTarget()
+	local character = player.Character
+	if not character then
+		return nil, nil, "Персонаж не загружен."
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root then
+		return nil, nil, "Не найден Humanoid/HumanoidRootPart."
+	end
+
+	local seat = humanoid.SeatPart
+	if seat and seat:IsA("VehicleSeat") then
+		local vehicleRoot = seat.AssemblyRootPart or seat
+		return vehicleRoot, humanoid, "vehicle"
+	end
+
+	return root, humanoid, "character"
+end
+
 local function stopFlyMode()
 	if not flyMode then return end
 	flyMode = false
@@ -282,41 +305,41 @@ local function stopFlyMode()
 	end
 	flyVelocity = nil
 	flyGyro = nil
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.PlatformStand = false
+	if flyTargetHumanoid then
+		flyTargetHumanoid.PlatformStand = false
 	end
+	flyTargetPart = nil
+	flyTargetHumanoid = nil
 end
 
 local function startFlyMode()
 	if flyMode or not running then return end
-	local root = getRootPart()
-	if not root then
-		openWindow("Не найден HumanoidRootPart. Персонаж не загружен.", "Крылья")
+	local targetPart, humanoid, targetKind = resolveFlyTarget()
+	if not targetPart then
+		openWindow("Не удалось включить полёт: цель не найдена.", "Крылья")
 		return
 	end
 	flyMode = true
-	wingsBtn.Text = "Крылья: ON"
+	flyTargetPart = targetPart
+	flyTargetHumanoid = humanoid
+	wingsBtn.Text = targetKind == "vehicle" and "Крылья: АВТО" or "Крылья: ON"
 	wingsBtn.BackgroundColor3 = Color3.fromRGB(140, 75, 210)
 
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.PlatformStand = true
+	if flyTargetHumanoid then
+		flyTargetHumanoid.PlatformStand = true
 	end
 
 	flyVelocity = Instance.new("BodyVelocity")
 	flyVelocity.MaxForce = Vector3.new(1e9, 1e9, 1e9)
 	flyVelocity.P = 1e4
 	flyVelocity.Velocity = Vector3.zero
-	flyVelocity.Parent = root
+	flyVelocity.Parent = flyTargetPart
 
 	flyGyro = Instance.new("BodyGyro")
 	flyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
 	flyGyro.P = 2e4
-	flyGyro.CFrame = root.CFrame
-	flyGyro.Parent = root
+	flyGyro.CFrame = flyTargetPart.CFrame
+	flyGyro.Parent = flyTargetPart
 end
 
 local function setServerUiVisible(visible)
@@ -652,8 +675,7 @@ connect(RunService.RenderStepped, function(dt)
 	end
 
 	if flyMode then
-		local root = getRootPart()
-		if not root or not flyVelocity or not flyGyro then
+		if not flyTargetPart or not flyTargetPart.Parent or not flyVelocity or not flyGyro then
 			stopFlyMode()
 			return
 		end
@@ -670,6 +692,6 @@ connect(RunService.RenderStepped, function(dt)
 			dir = dir.Unit
 		end
 		flyVelocity.Velocity = camera.CFrame:VectorToWorldSpace(dir) * speed
-		flyGyro.CFrame = CFrame.new(root.Position, root.Position + camera.CFrame.LookVector)
+		flyGyro.CFrame = CFrame.new(flyTargetPart.Position, flyTargetPart.Position + camera.CFrame.LookVector)
 	end
 end)
