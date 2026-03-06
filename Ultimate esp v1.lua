@@ -558,11 +558,9 @@ LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
     refreshAllVisuals()
 end)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-    if gameProcessedEvent then
-        return
-    end
-
+UserInputService.InputBegan:Connect(function(input)
+    -- Do not block by gameProcessedEvent: many weapons consume RMB for ADS,
+    -- and we still want assist while RMB is physically held.
     if input.UserInputType == Enum.UserInputType.MouseButton2 and SETTINGS.AssistHoldMouseButton2 then
         aimHoldingRMB = true
     end
@@ -589,6 +587,11 @@ RunService.RenderStepped:Connect(function(deltaTime)
     if refreshAccumulator >= SETTINGS.RefreshInterval then
         refreshAccumulator = 0
         refreshAllVisuals()
+    end
+
+    -- Fallback: keep RMB state synced even if input events are swallowed by weapon ADS logic.
+    if SETTINGS.AssistHoldMouseButton2 then
+        aimHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     end
 
     updateRadiusUI()
