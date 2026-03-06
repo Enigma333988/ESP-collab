@@ -197,7 +197,6 @@ local function stopCameraMode()
 	camera.CameraType = savedCameraType
 	camera.CFrame = savedCameraCF
 	setServerUiVisible(true)
-	frame.Visible = true
 end
 
 local function startCameraMode()
@@ -214,7 +213,6 @@ local function startCameraMode()
 	UIS.MouseBehavior = Enum.MouseBehavior.Default
 	UIS.MouseIconEnabled = true
 	setServerUiVisible(false)
-	frame.Visible = false
 end
 
 local function shutdownScript()
