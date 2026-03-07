@@ -1,0 +1,68 @@
+-- HAWK: ESP для головы мальчиков (Workspace.Male.Head)
+-- LocalScript
+
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local SETTINGS = {
+    Enabled = true,
+    Color = Color3.fromRGB(80, 190, 255),
+    Transparency = 0.2,
+    Padding = Vector3.new(0.15, 0.15, 0.15),
+}
+
+local headAdornments = {}
+
+local function isTargetHead(part)
+    return part
+        and part:IsDescendantOf(Workspace)
+        and part:IsA("MeshPart")
+        and part.Name == "Head"
+        and part.Parent
+        and part.Parent.Name == "Male"
+end
+
+local function cleanupAdornment(head)
+    local adornment = headAdornments[head]
+    if adornment then
+        adornment:Destroy()
+        headAdornments[head] = nil
+    end
+end
+
+local function ensureHeadESP()
+    if not SETTINGS.Enabled then
+        for head in pairs(headAdornments) do
+            cleanupAdornment(head)
+        end
+        return
+    end
+
+    for _, instance in ipairs(Workspace:GetDescendants()) do
+        if isTargetHead(instance) then
+            local adornment = headAdornments[instance]
+            if not adornment then
+                adornment = Instance.new("BoxHandleAdornment")
+                adornment.Name = "BoysHeadESP"
+                adornment.AlwaysOnTop = true
+                adornment.ZIndex = 5
+                headAdornments[instance] = adornment
+            end
+
+            adornment.Adornee = instance
+            adornment.Size = instance.Size + SETTINGS.Padding
+            adornment.Color3 = SETTINGS.Color
+            adornment.Transparency = SETTINGS.Transparency
+            adornment.Parent = instance
+        end
+    end
+
+    for head in pairs(headAdornments) do
+        if not isTargetHead(head) then
+            cleanupAdornment(head)
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(ensureHeadESP)
+ensureHeadESP()
