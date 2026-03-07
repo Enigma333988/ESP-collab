@@ -1,4 +1,4 @@
--- HAWK: лёгкий ESP для головы мальчиков (только надпись + дистанция)
+-- HAWK: лёгкий ESP для людей и зомби (надпись + дистанция)
 -- LocalScript
 
 local Players = game:GetService("Players")
@@ -19,6 +19,11 @@ local SETTINGS = {
 local trackedHeads = {}
 local updateAccumulator = 0
 
+local TARGET_GROUP_LABELS = {
+    Male = "Люди",
+    Zombie = "Зомби",
+}
+
 local function getLocalRoot()
     local character = LocalPlayer.Character
     if not character then
@@ -28,13 +33,20 @@ local function getLocalRoot()
     return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function getHeadGroupLabel(part)
+    if not part
+        or not part:IsDescendantOf(Workspace)
+        or not part:IsA("MeshPart")
+        or part.Name ~= "Head"
+        or not part.Parent then
+        return nil
+    end
+
+    return TARGET_GROUP_LABELS[part.Parent.Name]
+end
+
 local function isTargetHead(part)
-    return part
-        and part:IsDescendantOf(Workspace)
-        and part:IsA("MeshPart")
-        and part.Name == "Head"
-        and part.Parent
-        and part.Parent.Name == "Male"
+    return getHeadGroupLabel(part) ~= nil
 end
 
 local function detachHead(head)
@@ -47,8 +59,8 @@ end
 
 local function createHeadLabel(head)
     local billboard = Instance.new("BillboardGui")
-    billboard.Name = "BoysHeadLabel"
-    billboard.Size = UDim2.fromOffset(140, 24)
+    billboard.Name = "TargetHeadLabel"
+    billboard.Size = UDim2.fromOffset(150, 24)
     billboard.StudsOffset = SETTINGS.StudsOffset
     billboard.AlwaysOnTop = true
     billboard.MaxDistance = SETTINGS.MaxDistance
@@ -63,7 +75,7 @@ local function createHeadLabel(head)
     label.TextColor3 = SETTINGS.TextColor
     label.TextSize = SETTINGS.TextSize
     label.TextStrokeTransparency = 0.15
-    label.Text = "Head | --m"
+    label.Text = "--"
     label.Parent = billboard
 
     trackedHeads[head] = billboard
@@ -88,16 +100,17 @@ local function refreshHeadLabels()
     local localRoot = getLocalRoot()
 
     for head, billboard in pairs(trackedHeads) do
-        if not isTargetHead(head) then
+        local groupLabel = getHeadGroupLabel(head)
+        if not groupLabel then
             detachHead(head)
         else
             local label = billboard:FindFirstChild("Distance")
             if label then
                 if localRoot then
                     local distance = (head.Position - localRoot.Position).Magnitude
-                    label.Text = string.format("Head | %dm", math.floor(distance + 0.5))
+                    label.Text = string.format("%s | %dm", groupLabel, math.floor(distance + 0.5))
                 else
-                    label.Text = "Head | --m"
+                    label.Text = string.format("%s | --m", groupLabel)
                 end
             end
         end
