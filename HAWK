@@ -1,1 +1,83 @@
+--[[
+    HAWK: Zombie head lock to crosshair
+    Поведение:
+    - Находит головы зомби в Workspace.Zombies
+    - Держит голову каждого зомби точно в центре прицела (по look vector камеры)
+    - Дистанция до прицела настраивается через LOCK_DISTANCE_METERS
+]]
 
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local CAMERA = Workspace.CurrentCamera
+local ZOMBIES_FOLDER = Workspace:WaitForChild("Zombies")
+
+local LOCK_DISTANCE_METERS = 10
+local HEAD_NAME = "Head"
+
+local cachedHeadOffsets = {}
+
+local function getZombieHead(model)
+    local head = model:FindFirstChild(HEAD_NAME)
+    if head and head:IsA("MeshPart") then
+        return head
+    end
+    return nil
+end
+
+local function prepareModel(model)
+    if not model:IsA("Model") then
+        return nil
+    end
+
+    local head = getZombieHead(model)
+    if not head then
+        return nil
+    end
+
+    if not model.PrimaryPart then
+        model.PrimaryPart = head
+    end
+
+    if not cachedHeadOffsets[model] then
+        cachedHeadOffsets[model] = model:GetPivot():ToObjectSpace(head.CFrame)
+    end
+
+    for _, part in ipairs(model:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+            part.AssemblyLinearVelocity = Vector3.zero
+            part.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+
+    return head
+end
+
+local function updateZombieModel(model)
+    local head = prepareModel(model)
+    if not head or not CAMERA then
+        return
+    end
+
+    local headOffset = cachedHeadOffsets[model]
+    local lookCFrame = CAMERA.CFrame
+
+    local targetHeadPosition = lookCFrame.Position + (lookCFrame.LookVector * LOCK_DISTANCE_METERS)
+    local targetHeadCFrame = CFrame.new(targetHeadPosition, targetHeadPosition + lookCFrame.LookVector)
+
+    local targetModelPivot = targetHeadCFrame * headOffset:Inverse()
+    model:PivotTo(targetModelPivot)
+end
+
+RunService.Heartbeat:Connect(function()
+    CAMERA = Workspace.CurrentCamera
+
+    for _, zombie in ipairs(ZOMBIES_FOLDER:GetChildren()) do
+        updateZombieModel(zombie)
+    end
+end)
+
+ZOMBIES_FOLDER.ChildRemoved:Connect(function(child)
+    cachedHeadOffsets[child] = nil
+end)
