@@ -2,8 +2,9 @@
     HAWK: Auto-aim + auto-fire for nearest zombie
     Поведение:
     - Ищет ближайшего зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
-    - Перевыбирает цель каждые 200мс и берёт самого близкого валидного зомби
-    - Если у зомби нет явного Health/Humanoid, цель всё равно считается живой
+    - Наводится в тело (HumanoidRootPart/Torso), попадание в голову не обязательно
+    - Перевыбирает цель каждые 200мс
+    - Если зомби заметно ниже уровня персонажа, считается мёртвым и игнорируется
 ]]
 
 local Players = game:GetService("Players")
@@ -14,10 +15,9 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local LOCAL_PLAYER = Players.LocalPlayer
 local ZOMBIES_FOLDER = Workspace:FindFirstChild("Zombies_Local") or Workspace:WaitForChild("Zombies_Local")
 
-local HEAD_NAME = "Head"
 local FIRE_MOUSE_BUTTON = Enum.UserInputType.MouseButton1
 local RETARGET_INTERVAL = 0.2
-local MIN_VALID_HEAD_Y = -100
+local MAX_ZOMBIE_DROP_BELOW_PLAYER = 6
 
 local currentTarget = nil
 local isFiring = false
@@ -34,14 +34,6 @@ local function getCharacterRoot()
     end
 
     return character:FindFirstChild("HumanoidRootPart")
-end
-
-local function getZombieHead(model)
-    local head = model:FindFirstChild(HEAD_NAME)
-    if head and head:IsA("BasePart") then
-        return head
-    end
-    return nil
 end
 
 local function getZombieHumanoid(model)
@@ -62,6 +54,36 @@ local function getZombieHealthValue(model)
     return nil
 end
 
+local function getZombieAimPart(model)
+    local root = model:FindFirstChild("HumanoidRootPart")
+    if root and root:IsA("BasePart") then
+        return root
+    end
+
+    local upperTorso = model:FindFirstChild("UpperTorso")
+    if upperTorso and upperTorso:IsA("BasePart") then
+        return upperTorso
+    end
+
+    local torso = model:FindFirstChild("Torso")
+    if torso and torso:IsA("BasePart") then
+        return torso
+    end
+
+    local head = model:FindFirstChild("Head")
+    if head and head:IsA("BasePart") then
+        return head
+    end
+
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("BasePart") then
+            return child
+        end
+    end
+
+    return nil
+end
+
 local function hasDeadFlag(model)
     local deadFlag = model:FindFirstChild("Dead") or model:FindFirstChild("IsDead") or model:FindFirstChild("Died")
     if deadFlag and deadFlag:IsA("BoolValue") then
@@ -71,17 +93,17 @@ local function hasDeadFlag(model)
     return false
 end
 
-local function isZombieAlive(model)
+local function isZombieAlive(model, playerRoot)
     if not model or not model.Parent then
         return false
     end
 
-    local head = getZombieHead(model)
-    if not head then
+    local aimPart = getZombieAimPart(model)
+    if not aimPart then
         return false
     end
 
-    if head.Position.Y < MIN_VALID_HEAD_Y then
+    if playerRoot and aimPart.Position.Y < (playerRoot.Position.Y - MAX_ZOMBIE_DROP_BELOW_PLAYER) then
         return false
     end
 
@@ -99,14 +121,12 @@ local function isZombieAlive(model)
         return healthValue > 0
     end
 
-    -- В некоторых сборках зомби нет ни Humanoid, ни Health value.
-    -- Тогда считаем цель живой, если есть голова и не стоит dead-флаг.
     return true
 end
 
 local function getNearestAliveZombie()
-    local root = getCharacterRoot()
-    if not root then
+    local playerRoot = getCharacterRoot()
+    if not playerRoot then
         return nil
     end
 
@@ -114,9 +134,9 @@ local function getNearestAliveZombie()
     local nearestDistance = math.huge
 
     for _, zombie in ipairs(ZOMBIES_FOLDER:GetChildren()) do
-        if zombie:IsA("Model") and isZombieAlive(zombie) then
-            local head = getZombieHead(zombie)
-            local distance = (head.Position - root.Position).Magnitude
+        if zombie:IsA("Model") and isZombieAlive(zombie, playerRoot) then
+            local aimPart = getZombieAimPart(zombie)
+            local distance = (aimPart.Position - playerRoot.Position).Magnitude
 
             if distance < nearestDistance then
                 nearestDistance = distance
@@ -148,13 +168,13 @@ end
 
 local function aimAtZombie(model)
     local camera = getCamera()
-    local head = getZombieHead(model)
-    if not camera or not head then
+    local aimPart = getZombieAimPart(model)
+    if not camera or not aimPart then
         return
     end
 
     local origin = camera.CFrame.Position
-    camera.CFrame = CFrame.new(origin, head.Position)
+    camera.CFrame = CFrame.new(origin, aimPart.Position)
 end
 
 RunService.RenderStepped:Connect(function()
@@ -165,7 +185,7 @@ RunService.RenderStepped:Connect(function()
         lastRetargetTime = now
     end
 
-    if currentTarget and isZombieAlive(currentTarget) then
+    if currentTarget and isZombieAlive(currentTarget, getCharacterRoot()) then
         aimAtZombie(currentTarget)
         startFiring()
     else
