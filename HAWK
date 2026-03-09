@@ -1,10 +1,10 @@
 --[[
-    HAWK: Auto-aim + auto-fire for nearest zombie
+    HAWK: Horizontal auto-aim + auto-fire for nearest zombie
     Поведение:
-    - Ищет ближайшего зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
-    - Наводится в тело и разворачивает персонажа лицом в цель (не зависит от курсора)
-    - Перевыбирает цель каждые 200мс
-    - Если зомби падает ниже обычного уровня персонажа, считается мёртвым и игнорируется
+    - Стреляет в направлении ближайшего зомби из Workspace.Zombies_Local
+    - Вертикальная наводка игнорируется (только поворот по XZ)
+    - Если зомби опустился ниже своей исходной высоты даже немного,
+      он считается мёртвым и сразу игнорируется
 ]]
 
 local Players = game:GetService("Players")
@@ -16,12 +16,13 @@ local LOCAL_PLAYER = Players.LocalPlayer
 local ZOMBIES_FOLDER = Workspace:FindFirstChild("Zombies_Local") or Workspace:WaitForChild("Zombies_Local")
 
 local FIRE_MOUSE_BUTTON = Enum.UserInputType.MouseButton1
-local RETARGET_INTERVAL = 0.2
-local MAX_ZOMBIE_DROP_BELOW_PLAYER = 2
+local RETARGET_INTERVAL = 0.05
+local FALL_DEAD_OFFSET = 0.8
 
 local currentTarget = nil
 local isFiring = false
 local lastRetargetTime = 0
+local zombieBaseY = {}
 
 local function getCamera()
     return Workspace.CurrentCamera
@@ -55,15 +56,6 @@ local function getZombieHumanoid(model)
             return child
         end
     end
-    return nil
-end
-
-local function getZombieHealthValue(model)
-    local healthValue = model:FindFirstChild("Health")
-    if healthValue and (healthValue:IsA("NumberValue") or healthValue:IsA("IntValue")) then
-        return healthValue.Value
-    end
-
     return nil
 end
 
@@ -106,7 +98,18 @@ local function hasDeadFlag(model)
     return false
 end
 
-local function isZombieAlive(model, playerRoot)
+local function rememberZombieBaseY(model, aimPart)
+    if zombieBaseY[model] == nil then
+        zombieBaseY[model] = aimPart.Position.Y
+    end
+end
+
+local function fellBelowBaseY(model, aimPart)
+    rememberZombieBaseY(model, aimPart)
+    return aimPart.Position.Y < (zombieBaseY[model] - FALL_DEAD_OFFSET)
+end
+
+local function isZombieAlive(model)
     if not model or not model.Parent then
         return false
     end
@@ -116,22 +119,17 @@ local function isZombieAlive(model, playerRoot)
         return false
     end
 
-    if playerRoot and aimPart.Position.Y < (playerRoot.Position.Y - MAX_ZOMBIE_DROP_BELOW_PLAYER) then
+    if hasDeadFlag(model) then
         return false
     end
 
-    if hasDeadFlag(model) then
+    if fellBelowBaseY(model, aimPart) then
         return false
     end
 
     local humanoid = getZombieHumanoid(model)
     if humanoid then
         return humanoid.Health > 0 and humanoid:GetState() ~= Enum.HumanoidStateType.Dead
-    end
-
-    local healthValue = getZombieHealthValue(model)
-    if healthValue ~= nil then
-        return healthValue > 0
     end
 
     return true
@@ -147,7 +145,7 @@ local function getNearestAliveZombie()
     local nearestDistance = math.huge
 
     for _, zombie in ipairs(ZOMBIES_FOLDER:GetChildren()) do
-        if zombie:IsA("Model") and isZombieAlive(zombie, playerRoot) then
+        if zombie:IsA("Model") and isZombieAlive(zombie) then
             local aimPart = getZombieAimPart(zombie)
             local distance = (aimPart.Position - playerRoot.Position).Magnitude
 
@@ -179,26 +177,21 @@ local function stopFiring()
     VirtualInputManager:SendMouseButtonEvent(0, 0, FIRE_MOUSE_BUTTON.Value, false, game, 0)
 end
 
-local function aimAtZombie(model)
-    local camera = getCamera()
-    local aimPart = getZombieAimPart(model)
-    if not camera or not aimPart then
-        return
-    end
-
-    local origin = camera.CFrame.Position
-    camera.CFrame = CFrame.new(origin, aimPart.Position)
-end
-
-local function faceCharacterToZombie(model)
+local function aimHorizontallyToZombie(model)
     local playerRoot = getCharacterRoot()
     local aimPart = getZombieAimPart(model)
-    if not playerRoot or not aimPart then
+    local camera = getCamera()
+    if not playerRoot or not aimPart or not camera then
         return
     end
 
-    local lookTarget = Vector3.new(aimPart.Position.X, playerRoot.Position.Y, aimPart.Position.Z)
-    playerRoot.CFrame = CFrame.lookAt(playerRoot.Position, lookTarget)
+    local flatTarget = Vector3.new(aimPart.Position.X, playerRoot.Position.Y, aimPart.Position.Z)
+
+    playerRoot.CFrame = CFrame.lookAt(playerRoot.Position, flatTarget)
+
+    local camOrigin = camera.CFrame.Position
+    local camFlatTarget = Vector3.new(aimPart.Position.X, camOrigin.Y, aimPart.Position.Z)
+    camera.CFrame = CFrame.lookAt(camOrigin, camFlatTarget)
 
     local humanoid = getCharacterHumanoid()
     if humanoid then
@@ -216,15 +209,13 @@ end
 RunService.RenderStepped:Connect(function()
     local now = os.clock()
 
-    if now - lastRetargetTime >= RETARGET_INTERVAL then
+    if (not currentTarget) or (not isZombieAlive(currentTarget)) or (now - lastRetargetTime >= RETARGET_INTERVAL) then
         currentTarget = getNearestAliveZombie()
         lastRetargetTime = now
     end
 
-    local playerRoot = getCharacterRoot()
-    if currentTarget and isZombieAlive(currentTarget, playerRoot) then
-        aimAtZombie(currentTarget)
-        faceCharacterToZombie(currentTarget)
+    if currentTarget and isZombieAlive(currentTarget) then
+        aimHorizontallyToZombie(currentTarget)
         startFiring()
     else
         currentTarget = nil
@@ -234,6 +225,8 @@ RunService.RenderStepped:Connect(function()
 end)
 
 ZOMBIES_FOLDER.ChildRemoved:Connect(function(child)
+    zombieBaseY[child] = nil
+
     if child == currentTarget then
         currentTarget = nil
         restoreCharacterAutoRotate()
