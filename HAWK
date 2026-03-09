@@ -1,7 +1,7 @@
 --[[
     HAWK: Auto-aim + auto-fire for nearest zombie
     Поведение:
-    - Ищет ближайшего живого зомби в Workspace.Zombies (включая тех, кто за спиной)
+    - Ищет ближайшего живого зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
     - Как только цель выбрана, держит её в прицеле и стреляет до смерти цели
     - После смерти текущей цели сразу переключается на нового ближайшего зомби
 ]]
@@ -12,7 +12,7 @@ local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LOCAL_PLAYER = Players.LocalPlayer
-local ZOMBIES_FOLDER = Workspace:WaitForChild("Zombies")
+local ZOMBIES_FOLDER = Workspace:FindFirstChild("Zombies_Local") or Workspace:WaitForChild("Zombies_Local")
 
 local HEAD_NAME = "Head"
 local FIRE_MOUSE_BUTTON = Enum.UserInputType.MouseButton1
