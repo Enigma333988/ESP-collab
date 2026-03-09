@@ -2,8 +2,8 @@
     HAWK: Auto-aim + auto-fire for nearest zombie
     Поведение:
     - Ищет ближайшего живого зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
-    - Как только цель выбрана, держит её в прицеле и стреляет до смерти цели
-    - После смерти текущей цели сразу переключается на нового ближайшего зомби
+    - Живым считается зомби с Head и положительным HP
+    - Перевыбирает цель каждые 200мс и берёт самого близкого живого зомби
 ]]
 
 local Players = game:GetService("Players")
@@ -16,9 +16,11 @@ local ZOMBIES_FOLDER = Workspace:FindFirstChild("Zombies_Local") or Workspace:Wa
 
 local HEAD_NAME = "Head"
 local FIRE_MOUSE_BUTTON = Enum.UserInputType.MouseButton1
+local RETARGET_INTERVAL = 0.2
 
 local currentTarget = nil
 local isFiring = false
+local lastRetargetTime = 0
 
 local function getCamera()
     return Workspace.CurrentCamera
@@ -50,6 +52,15 @@ local function getZombieHumanoid(model)
     return nil
 end
 
+local function getZombieHealthValue(model)
+    local healthValue = model:FindFirstChild("Health")
+    if healthValue and (healthValue:IsA("NumberValue") or healthValue:IsA("IntValue")) then
+        return healthValue.Value
+    end
+
+    return nil
+end
+
 local function isZombieAlive(model)
     if not model or not model.Parent then
         return false
@@ -65,7 +76,12 @@ local function isZombieAlive(model)
         return humanoid.Health > 0
     end
 
-    return true
+    local healthValue = getZombieHealthValue(model)
+    if healthValue ~= nil then
+        return healthValue > 0
+    end
+
+    return false
 end
 
 local function getNearestAliveZombie()
@@ -122,19 +138,18 @@ local function aimAtZombie(model)
 end
 
 RunService.RenderStepped:Connect(function()
-    if currentTarget and not isZombieAlive(currentTarget) then
-        currentTarget = nil
-        stopFiring()
-    end
+    local now = os.clock()
 
-    if not currentTarget then
+    if now - lastRetargetTime >= RETARGET_INTERVAL then
         currentTarget = getNearestAliveZombie()
+        lastRetargetTime = now
     end
 
-    if currentTarget then
+    if currentTarget and isZombieAlive(currentTarget) then
         aimAtZombie(currentTarget)
         startFiring()
     else
+        currentTarget = nil
         stopFiring()
     end
 end)
