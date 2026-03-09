@@ -1,9 +1,9 @@
 --[[
     HAWK: Auto-aim + auto-fire for nearest zombie
     Поведение:
-    - Ищет ближайшего живого зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
-    - Живым считается зомби с Head и положительным HP
-    - Перевыбирает цель каждые 200мс и берёт самого близкого живого зомби
+    - Ищет ближайшего зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
+    - Перевыбирает цель каждые 200мс и берёт самого близкого валидного зомби
+    - Если у зомби нет явного Health/Humanoid, цель всё равно считается живой
 ]]
 
 local Players = game:GetService("Players")
@@ -17,6 +17,7 @@ local ZOMBIES_FOLDER = Workspace:FindFirstChild("Zombies_Local") or Workspace:Wa
 local HEAD_NAME = "Head"
 local FIRE_MOUSE_BUTTON = Enum.UserInputType.MouseButton1
 local RETARGET_INTERVAL = 0.2
+local MIN_VALID_HEAD_Y = -100
 
 local currentTarget = nil
 local isFiring = false
@@ -61,6 +62,15 @@ local function getZombieHealthValue(model)
     return nil
 end
 
+local function hasDeadFlag(model)
+    local deadFlag = model:FindFirstChild("Dead") or model:FindFirstChild("IsDead") or model:FindFirstChild("Died")
+    if deadFlag and deadFlag:IsA("BoolValue") then
+        return deadFlag.Value == true
+    end
+
+    return false
+end
+
 local function isZombieAlive(model)
     if not model or not model.Parent then
         return false
@@ -71,9 +81,17 @@ local function isZombieAlive(model)
         return false
     end
 
+    if head.Position.Y < MIN_VALID_HEAD_Y then
+        return false
+    end
+
+    if hasDeadFlag(model) then
+        return false
+    end
+
     local humanoid = getZombieHumanoid(model)
     if humanoid then
-        return humanoid.Health > 0
+        return humanoid.Health > 0 and humanoid:GetState() ~= Enum.HumanoidStateType.Dead
     end
 
     local healthValue = getZombieHealthValue(model)
@@ -81,7 +99,9 @@ local function isZombieAlive(model)
         return healthValue > 0
     end
 
-    return false
+    -- В некоторых сборках зомби нет ни Humanoid, ни Health value.
+    -- Тогда считаем цель живой, если есть голова и не стоит dead-флаг.
+    return true
 end
 
 local function getNearestAliveZombie()
