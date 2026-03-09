@@ -2,9 +2,9 @@
     HAWK: Auto-aim + auto-fire for nearest zombie
     Поведение:
     - Ищет ближайшего зомби в Workspace.Zombies_Local (включая тех, кто за спиной)
-    - Наводится в тело (HumanoidRootPart/Torso), попадание в голову не обязательно
+    - Наводится в тело и разворачивает персонажа лицом в цель (не зависит от курсора)
     - Перевыбирает цель каждые 200мс
-    - Если зомби заметно ниже уровня персонажа, считается мёртвым и игнорируется
+    - Если зомби падает ниже обычного уровня персонажа, считается мёртвым и игнорируется
 ]]
 
 local Players = game:GetService("Players")
@@ -17,7 +17,7 @@ local ZOMBIES_FOLDER = Workspace:FindFirstChild("Zombies_Local") or Workspace:Wa
 
 local FIRE_MOUSE_BUTTON = Enum.UserInputType.MouseButton1
 local RETARGET_INTERVAL = 0.2
-local MAX_ZOMBIE_DROP_BELOW_PLAYER = 6
+local MAX_ZOMBIE_DROP_BELOW_PLAYER = 2
 
 local currentTarget = nil
 local isFiring = false
@@ -27,13 +27,26 @@ local function getCamera()
     return Workspace.CurrentCamera
 end
 
+local function getCharacter()
+    return LOCAL_PLAYER.Character
+end
+
 local function getCharacterRoot()
-    local character = LOCAL_PLAYER.Character
+    local character = getCharacter()
     if not character then
         return nil
     end
 
     return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getCharacterHumanoid()
+    local character = getCharacter()
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChildOfClass("Humanoid")
 end
 
 local function getZombieHumanoid(model)
@@ -177,6 +190,29 @@ local function aimAtZombie(model)
     camera.CFrame = CFrame.new(origin, aimPart.Position)
 end
 
+local function faceCharacterToZombie(model)
+    local playerRoot = getCharacterRoot()
+    local aimPart = getZombieAimPart(model)
+    if not playerRoot or not aimPart then
+        return
+    end
+
+    local lookTarget = Vector3.new(aimPart.Position.X, playerRoot.Position.Y, aimPart.Position.Z)
+    playerRoot.CFrame = CFrame.lookAt(playerRoot.Position, lookTarget)
+
+    local humanoid = getCharacterHumanoid()
+    if humanoid then
+        humanoid.AutoRotate = false
+    end
+end
+
+local function restoreCharacterAutoRotate()
+    local humanoid = getCharacterHumanoid()
+    if humanoid then
+        humanoid.AutoRotate = true
+    end
+end
+
 RunService.RenderStepped:Connect(function()
     local now = os.clock()
 
@@ -185,11 +221,14 @@ RunService.RenderStepped:Connect(function()
         lastRetargetTime = now
     end
 
-    if currentTarget and isZombieAlive(currentTarget, getCharacterRoot()) then
+    local playerRoot = getCharacterRoot()
+    if currentTarget and isZombieAlive(currentTarget, playerRoot) then
         aimAtZombie(currentTarget)
+        faceCharacterToZombie(currentTarget)
         startFiring()
     else
         currentTarget = nil
+        restoreCharacterAutoRotate()
         stopFiring()
     end
 end)
@@ -197,6 +236,7 @@ end)
 ZOMBIES_FOLDER.ChildRemoved:Connect(function(child)
     if child == currentTarget then
         currentTarget = nil
+        restoreCharacterAutoRotate()
         stopFiring()
     end
 end)
