@@ -51,7 +51,7 @@ topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -500, 1, 0)
+title.Size = UDim2.new(1, -586, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamSemibold
@@ -144,7 +144,7 @@ cursorCorner.Parent = cursorBtn
 local pickupBtn = Instance.new("TextButton")
 pickupBtn.Name = "Pickup"
 pickupBtn.Size = UDim2.fromOffset(64, 26)
-pickupBtn.Position = UDim2.fromOffset(230, 6)
+pickupBtn.Position = UDim2.new(1, -482, 0.5, -13)
 pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
 pickupBtn.BorderSizePixel = 0
 pickupBtn.Font = Enum.Font.GothamSemibold
@@ -323,8 +323,8 @@ end
 
 local function setPickupButtonState()
 	if lastCollectedInfo and lastCollectedInfo.name then
-		pickupBtn.Text = "Лут✓"
-		pickupBtn.BackgroundColor3 = Color3.fromRGB(160, 120, 45)
+		pickupBtn.Text = "Лут"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
 	else
 		pickupBtn.Text = "Лут"
 		pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
