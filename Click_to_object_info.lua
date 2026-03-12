@@ -248,6 +248,7 @@ local forceCursorMode = false
 local cursorHotkey = "Ctrl+M"
 local lastCollectedInfo = nil
 local lastClickedTarget = nil
+local lootTrackingEnabled = false
 
 local flyMode = false
 local flyMove = {
@@ -322,16 +323,18 @@ local function resolveFlyTarget()
 end
 
 local function setPickupButtonState()
-	if lastCollectedInfo and lastCollectedInfo.name then
-		pickupBtn.Text = "Лут"
-		pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
+	if lootTrackingEnabled then
+		pickupBtn.Text = "Лут: ON"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(160, 120, 45)
 	else
-		pickupBtn.Text = "Лут"
-		pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
+		pickupBtn.Text = "Лут: OFF"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(85, 70, 45)
 	end
 end
 
 local function rememberCollected(source, inst, extra)
+	if not lootTrackingEnabled then return end
+
 	local objectName = inst and inst.Name or "Unknown"
 	local className = inst and inst.ClassName or "Unknown"
 	local fullName = inst and inst:GetFullName() or "Unknown"
@@ -343,32 +346,7 @@ local function rememberCollected(source, inst, extra)
 		fullName = fullName,
 		extra = extra,
 	}
-	setPickupButtonState()
-	if source ~= "Character.Touched" then
-		local stamp = os.date("%H:%M:%S", lastCollectedInfo.time)
-		openWindow(("%s\n%s (%s)\n[%s]"):format(source, objectName, className, stamp), "Лут обновлён")
-	end
 end
-
-local function formatLastCollectedInfo()
-	if not lastCollectedInfo then
-		return "Пока ничего не зафиксировано.\n\nПодбери объект (например монетку), затем нажми кнопку Лут.", "Последний подбор"
-	end
-
-	local stamp = os.date("%H:%M:%S", lastCollectedInfo.time)
-	local lines = {
-		("Время: %s"):format(stamp),
-		("Источник: %s"):format(lastCollectedInfo.source),
-		("Name: %s"):format(lastCollectedInfo.name),
-		("ClassName: %s"):format(lastCollectedInfo.className),
-		("FullName: %s"):format(lastCollectedInfo.fullName),
-	}
-	if lastCollectedInfo.extra then
-		table.insert(lines, ("Детали: %s"):format(lastCollectedInfo.extra))
-	end
-	return table.concat(lines, "\n"), "Последний подбор"
-end
-
 local function stopFlyMode()
 	if not flyMode then return end
 	flyMode = false
@@ -562,8 +540,14 @@ end)
 
 connect(pickupBtn.MouseButton1Click, function()
 	if not running then return end
-	local text, header = formatLastCollectedInfo()
-	openWindow(text, header)
+	lootTrackingEnabled = not lootTrackingEnabled
+	setPickupButtonState()
+
+	if lootTrackingEnabled then
+		openWindow("Трекинг лута включён. Теперь события подбора будут записываться.", "Лут")
+	else
+		openWindow("Трекинг лута выключен. События больше не читаются в реальном времени.", "Лут")
+	end
 end)
 
 connect(xyzBtn.MouseButton1Click, function()
