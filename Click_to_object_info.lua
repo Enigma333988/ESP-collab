@@ -31,7 +31,7 @@ frame.Size = UDim2.fromOffset(560, 380)
 frame.Position = UDim2.new(0.5, -280, 0.5, -190)
 frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 frame.BorderSizePixel = 0
-frame.Visible = false
+frame.Visible = true
 frame.Parent = gui
 
 local corner = Instance.new("UICorner")
@@ -51,7 +51,7 @@ topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -586, 1, 0)
+title.Size = UDim2.new(1, -500, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamSemibold
@@ -144,7 +144,7 @@ cursorCorner.Parent = cursorBtn
 local pickupBtn = Instance.new("TextButton")
 pickupBtn.Name = "Pickup"
 pickupBtn.Size = UDim2.fromOffset(64, 26)
-pickupBtn.Position = UDim2.new(1, -482, 0.5, -13)
+pickupBtn.Position = UDim2.fromOffset(230, 6)
 pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
 pickupBtn.BorderSizePixel = 0
 pickupBtn.Font = Enum.Font.GothamSemibold
@@ -321,6 +321,16 @@ local function resolveFlyTarget()
 	return root, humanoid, "character"
 end
 
+local function setPickupButtonState()
+	if lastCollectedInfo and lastCollectedInfo.name then
+		pickupBtn.Text = "Лут✓"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(160, 120, 45)
+	else
+		pickupBtn.Text = "Лут"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
+	end
+end
+
 local function rememberCollected(source, inst, extra)
 	local objectName = inst and inst.Name or "Unknown"
 	local className = inst and inst.ClassName or "Unknown"
@@ -333,6 +343,11 @@ local function rememberCollected(source, inst, extra)
 		fullName = fullName,
 		extra = extra,
 	}
+	setPickupButtonState()
+	if source ~= "Character.Touched" then
+		local stamp = os.date("%H:%M:%S", lastCollectedInfo.time)
+		openWindow(("%s\n%s (%s)\n[%s]"):format(source, objectName, className, stamp), "Лут обновлён")
+	end
 end
 
 local function formatLastCollectedInfo()
@@ -353,6 +368,7 @@ local function formatLastCollectedInfo()
 	end
 	return table.concat(lines, "\n"), "Последний подбор"
 end
+
 local function stopFlyMode()
 	if not flyMode then return end
 	flyMode = false
@@ -503,6 +519,7 @@ local function shutdownScript()
 end
 
 setCursorButtonState()
+setPickupButtonState()
 closeBtn.MouseButton1Click:Connect(shutdownScript)
 
 -- Закрытие по ESC
@@ -591,13 +608,38 @@ local function hookCharacterTracking(character)
 	end)
 end
 
+local function hookCharacterTouchTracking(character)
+	for _, desc in ipairs(character:GetDescendants()) do
+		if desc:IsA("BasePart") then
+			connect(desc.Touched, function(hit)
+				if not running or not hit then return end
+				if hit:IsDescendantOf(character) then return end
+				rememberCollected("Character.Touched", hit, "Касание персонажа")
+			end)
+		end
+	end
+
+	connect(character.DescendantAdded, function(desc)
+		if not running then return end
+		if desc:IsA("BasePart") then
+			connect(desc.Touched, function(hit)
+				if not running or not hit then return end
+				if hit:IsDescendantOf(character) then return end
+				rememberCollected("Character.Touched", hit, "Касание персонажа")
+			end)
+		end
+	end)
+end
+
 if player.Character then
 	hookCharacterTracking(player.Character)
+	hookCharacterTouchTracking(player.Character)
 end
 
 connect(player.CharacterAdded, function(character)
 	if not running then return end
 	hookCharacterTracking(character)
+	hookCharacterTouchTracking(character)
 end)
 
 local function hookBackpackTracking(backpackInst)
@@ -638,7 +680,7 @@ connect(workspace.DescendantRemoving, function(inst)
 	if not part then return end
 
 	local distance = (part.Position - root.Position).Magnitude
-	if distance <= 20 then
+	if distance <= 60 then
 		local extra = ("Удалён рядом с игроком (dist=%.1f)"):format(distance)
 		if lastClickedTarget and (inst == lastClickedTarget or inst:IsDescendantOf(lastClickedTarget) or lastClickedTarget:IsDescendantOf(inst)) then
 			extra = extra .. ", совпал с последним кликом"
