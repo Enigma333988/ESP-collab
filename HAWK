@@ -1,1 +1,68 @@
+-- HAWK: авто-сбор монет (Coin MeshPart)
+-- Телепортирует игрока к ближайшей монете каждые 2 секунды.
+-- Дополнительно отслеживает удаление монет через Workspace.DescendantRemoving.
 
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local TELEPORT_DELAY = 2
+local COIN_NAME = "Coin"
+
+local function getRootPart()
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    return character:WaitForChild("HumanoidRootPart")
+end
+
+local function isCoin(instance)
+    return instance and instance:IsA("MeshPart") and instance.Name == COIN_NAME
+end
+
+local function getNearestCoin(fromPosition)
+    local nearest, nearestDistance
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if isCoin(obj) then
+            local distance = (obj.Position - fromPosition).Magnitude
+            if not nearestDistance or distance < nearestDistance then
+                nearest = obj
+                nearestDistance = distance
+            end
+        end
+    end
+
+    return nearest
+end
+
+local function collectByTouch(rootPart, coin)
+    -- Пробуем сэмулировать касание, если поддерживается в текущем эксплойт-окружении.
+    local ok = pcall(function()
+        if firetouchinterest then
+            firetouchinterest(rootPart, coin, 0)
+            task.wait()
+            firetouchinterest(rootPart, coin, 1)
+        end
+    end)
+
+    if not ok then
+        -- Ничего страшного: во многих играх достаточно просто телепортнуться к монете.
+    end
+end
+
+Workspace.DescendantRemoving:Connect(function(descendant)
+    if isCoin(descendant) then
+        print("[HAWK] Монета собрана/удалена:", descendant:GetFullName())
+    end
+end)
+
+while task.wait(TELEPORT_DELAY) do
+    local rootPart = getRootPart()
+    local coin = getNearestCoin(rootPart.Position)
+
+    if coin and coin.Parent then
+        rootPart.CFrame = coin.CFrame + Vector3.new(0, 2, 0)
+        collectByTouch(rootPart, coin)
+    else
+        warn("[HAWK] Монеты не найдены (ищу MeshPart с именем 'Coin').")
+    end
+end
