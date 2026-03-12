@@ -7,9 +7,10 @@ local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local COIN_NAME = "Coin"
-local TELEPORT_MIN_RADIUS = 12 -- минимальная дистанция телепорта от монеты
-local TELEPORT_MAX_RADIUS = 18 -- максимальная дистанция телепорта от монеты
+local TELEPORT_MIN_RADIUS = 18 -- минимальная дистанция телепорта от монеты
+local TELEPORT_MAX_RADIUS = 26 -- максимальная дистанция телепорта от монеты
 local REPATH_INTERVAL = 0.1 -- как часто обновлять MoveTo
+local TOUCH_DISTANCE = 3.5 -- имитация касания только когда уже почти дошли до монеты
 
 local enabled = true
 
@@ -46,6 +47,10 @@ local function getNearestCoin(fromPosition)
 end
 
 local function collectByTouch(rootPart, coin)
+    if (rootPart.Position - coin.Position).Magnitude > TOUCH_DISTANCE then
+        return
+    end
+
     pcall(function()
         if firetouchinterest then
             firetouchinterest(rootPart, coin, 0)
