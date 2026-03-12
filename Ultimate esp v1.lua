@@ -35,10 +35,16 @@ local SETTINGS = {
 local highlights = {}
 local infoBillboards = {}
 local trackedConnections = {}
+local globalConnections = {}
 
 local aimHoldingRMB = false
 local draggingSlider = false
 local refreshAccumulator = 0
+local scriptActive = true
+
+local draggingWindow = false
+local dragStartMouse = nil
+local dragStartPos = nil
 
 local uiRefs = {
     toggleEspButton = nil,
@@ -50,7 +56,16 @@ local uiRefs = {
     sliderFill = nil,
     sliderKnob = nil,
     captureCircle = nil,
+    screenGui = nil,
+    panel = nil,
+    titleBar = nil,
+    closeButton = nil,
 }
+
+local function addConnection(connection)
+    table.insert(globalConnections, connection)
+    return connection
+end
 
 local function getCurrentCamera()
     return Workspace.CurrentCamera
@@ -383,12 +398,40 @@ local function cleanupPlayer(player)
     cleanupVisuals(player)
 end
 
+local function shutdownScript()
+    if not scriptActive then
+        return
+    end
+
+    scriptActive = false
+    aimHoldingRMB = false
+    draggingSlider = false
+    draggingWindow = false
+    SETTINGS.ESPEnabled = false
+    SETTINGS.AssistEnabled = false
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        cleanupPlayer(player)
+    end
+
+    for _, connection in ipairs(globalConnections) do
+        connection:Disconnect()
+    end
+    table.clear(globalConnections)
+
+    if uiRefs.screenGui then
+        uiRefs.screenGui:Destroy()
+        uiRefs.screenGui = nil
+    end
+end
+
 local function createUi()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "EnemyEspAssistUI"
     screenGui.ResetOnSpawn = false
     screenGui.IgnoreGuiInset = true
     screenGui.Parent = PlayerGui
+    uiRefs.screenGui = screenGui
 
     local panel = Instance.new("Frame")
     panel.Name = "Panel"
@@ -397,21 +440,46 @@ local function createUi()
     panel.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     panel.BorderSizePixel = 0
     panel.Parent = screenGui
+    uiRefs.panel = panel
 
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 8)
     corner.Parent = panel
 
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.BackgroundTransparency = 1
+    titleBar.Size = UDim2.new(1, 0, 0, 32)
+    titleBar.Parent = panel
+    uiRefs.titleBar = titleBar
+
     local title = Instance.new("TextLabel")
     title.BackgroundTransparency = 1
-    title.Size = UDim2.new(1, -20, 0, 24)
-    title.Position = UDim2.new(0, 10, 0, 8)
+    title.Size = UDim2.new(1, -54, 1, 0)
+    title.Position = UDim2.new(0, 10, 0, 0)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 14
     title.TextColor3 = Color3.fromRGB(235, 235, 235)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Text = "Enemy ESP + Assist"
-    title.Parent = panel
+    title.Parent = titleBar
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.AnchorPoint = Vector2.new(1, 0.5)
+    closeButton.Size = UDim2.fromOffset(26, 26)
+    closeButton.Position = UDim2.new(1, -6, 0.5, 0)
+    closeButton.BackgroundColor3 = Color3.fromRGB(170, 55, 55)
+    closeButton.Text = "✕"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 15
+    closeButton.Parent = titleBar
+    uiRefs.closeButton = closeButton
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 6)
+    closeCorner.Parent = closeButton
 
     local function createToggleButton(name, y)
         local button = Instance.new("TextButton")
@@ -507,36 +575,78 @@ local function createUi()
     captureCircleStroke.Transparency = 0.15
     captureCircleStroke.Parent = uiRefs.captureCircle
 
-    uiRefs.sliderBar.InputBegan:Connect(function(input)
+    addConnection(uiRefs.sliderBar.InputBegan:Connect(function(input)
+        if not scriptActive then
+            return
+        end
+
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             draggingSlider = true
             setRadiusFromPixel(input.Position.X)
         end
-    end)
+    end))
 
-    uiRefs.toggleEspButton.MouseButton1Click:Connect(function()
+    addConnection(titleBar.InputBegan:Connect(function(input)
+        if not scriptActive then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingWindow = true
+            dragStartMouse = input.Position
+            dragStartPos = panel.Position
+        end
+    end))
+
+    addConnection(titleBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingWindow = false
+        end
+    end))
+
+    addConnection(closeButton.MouseButton1Click:Connect(function()
+        shutdownScript()
+    end))
+
+    addConnection(uiRefs.toggleEspButton.MouseButton1Click:Connect(function()
+        if not scriptActive then
+            return
+        end
+
         SETTINGS.ESPEnabled = not SETTINGS.ESPEnabled
         updateToggleButton(uiRefs.toggleEspButton, "ESP", SETTINGS.ESPEnabled)
         refreshAllVisuals()
-    end)
+    end))
 
-    uiRefs.toggleTeamButton.MouseButton1Click:Connect(function()
+    addConnection(uiRefs.toggleTeamButton.MouseButton1Click:Connect(function()
+        if not scriptActive then
+            return
+        end
+
         SETTINGS.TeamCheck = not SETTINGS.TeamCheck
         updateToggleButton(uiRefs.toggleTeamButton, "TeamCheck", SETTINGS.TeamCheck)
         refreshAllVisuals()
-    end)
+    end))
 
-    uiRefs.toggleAssistButton.MouseButton1Click:Connect(function()
+    addConnection(uiRefs.toggleAssistButton.MouseButton1Click:Connect(function()
+        if not scriptActive then
+            return
+        end
+
         SETTINGS.AssistEnabled = not SETTINGS.AssistEnabled
         updateToggleButton(uiRefs.toggleAssistButton, "Assist", SETTINGS.AssistEnabled)
         updateRadiusUI()
-    end)
+    end))
 
-    uiRefs.toggleInfoButton.MouseButton1Click:Connect(function()
+    addConnection(uiRefs.toggleInfoButton.MouseButton1Click:Connect(function()
+        if not scriptActive then
+            return
+        end
+
         SETTINGS.ShowInfo = not SETTINGS.ShowInfo
         updateToggleButton(uiRefs.toggleInfoButton, "Info", SETTINGS.ShowInfo)
         refreshAllVisuals()
-    end)
+    end))
 
     updateToggleButton(uiRefs.toggleEspButton, "ESP", SETTINGS.ESPEnabled)
     updateToggleButton(uiRefs.toggleTeamButton, "TeamCheck", SETTINGS.TeamCheck)
@@ -551,38 +661,69 @@ for _, player in ipairs(Players:GetPlayers()) do
     trackPlayer(player)
 end
 
-Players.PlayerAdded:Connect(trackPlayer)
-Players.PlayerRemoving:Connect(cleanupPlayer)
+addConnection(Players.PlayerAdded:Connect(trackPlayer))
+addConnection(Players.PlayerRemoving:Connect(cleanupPlayer))
 
-LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+addConnection(LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    if not scriptActive then
+        return
+    end
+
     refreshAllVisuals()
-end)
+end))
 
-UserInputService.InputBegan:Connect(function(input)
+addConnection(UserInputService.InputBegan:Connect(function(input)
+    if not scriptActive then
+        return
+    end
+
     -- Do not block by gameProcessedEvent: many weapons consume RMB for ADS,
     -- and we still want assist while RMB is physically held.
     if input.UserInputType == Enum.UserInputType.MouseButton2 and SETTINGS.AssistHoldMouseButton2 then
         aimHoldingRMB = true
     end
-end)
+end))
 
-UserInputService.InputEnded:Connect(function(input)
+addConnection(UserInputService.InputEnded:Connect(function(input)
+    if not scriptActive then
+        return
+    end
+
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         draggingSlider = false
+        draggingWindow = false
     end
 
     if input.UserInputType == Enum.UserInputType.MouseButton2 then
         aimHoldingRMB = false
     end
-end)
+end))
 
-UserInputService.InputChanged:Connect(function(input)
+addConnection(UserInputService.InputChanged:Connect(function(input)
+    if not scriptActive then
+        return
+    end
+
     if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
         setRadiusFromPixel(input.Position.X)
     end
-end)
 
-RunService.RenderStepped:Connect(function(deltaTime)
+    if draggingWindow and input.UserInputType == Enum.UserInputType.MouseMovement and dragStartMouse and dragStartPos then
+        local delta = input.Position - dragStartMouse
+        uiRefs.panel.Position = UDim2.new(
+            dragStartPos.X.Scale,
+            dragStartPos.X.Offset + delta.X,
+            dragStartPos.Y.Scale,
+            dragStartPos.Y.Offset + delta.Y
+        )
+    end
+end))
+
+addConnection(RunService.RenderStepped:Connect(function(deltaTime)
+    if not scriptActive then
+        return
+    end
+
     refreshAccumulator += deltaTime
     if refreshAccumulator >= SETTINGS.RefreshInterval then
         refreshAccumulator = 0
@@ -596,4 +737,4 @@ RunService.RenderStepped:Connect(function(deltaTime)
 
     updateRadiusUI()
     updateAssist()
-end)
+end))
