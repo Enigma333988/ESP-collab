@@ -31,7 +31,7 @@ frame.Size = UDim2.fromOffset(560, 380)
 frame.Position = UDim2.new(0.5, -280, 0.5, -190)
 frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 frame.BorderSizePixel = 0
-frame.Visible = false
+frame.Visible = true
 frame.Parent = gui
 
 local corner = Instance.new("UICorner")
@@ -51,7 +51,7 @@ topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -426, 1, 0)
+title.Size = UDim2.new(1, -500, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamSemibold
@@ -124,6 +124,38 @@ wingsBtn.Parent = topBar
 local wingsCorner = Instance.new("UICorner")
 wingsCorner.CornerRadius = UDim.new(0, 8)
 wingsCorner.Parent = wingsBtn
+
+local cursorBtn = Instance.new("TextButton")
+cursorBtn.Name = "Cursor"
+cursorBtn.Size = UDim2.fromOffset(64, 26)
+cursorBtn.Position = UDim2.new(1, -412, 0.5, -13)
+cursorBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+cursorBtn.BorderSizePixel = 0
+cursorBtn.Font = Enum.Font.GothamSemibold
+cursorBtn.TextSize = 13
+cursorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+cursorBtn.Text = "Курсор"
+cursorBtn.Parent = topBar
+
+local cursorCorner = Instance.new("UICorner")
+cursorCorner.CornerRadius = UDim.new(0, 8)
+cursorCorner.Parent = cursorBtn
+
+local pickupBtn = Instance.new("TextButton")
+pickupBtn.Name = "Pickup"
+pickupBtn.Size = UDim2.fromOffset(64, 26)
+pickupBtn.Position = UDim2.fromOffset(230, 6)
+pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
+pickupBtn.BorderSizePixel = 0
+pickupBtn.Font = Enum.Font.GothamSemibold
+pickupBtn.TextSize = 13
+pickupBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+pickupBtn.Text = "Лут"
+pickupBtn.Parent = topBar
+
+local pickupCorner = Instance.new("UICorner")
+pickupCorner.CornerRadius = UDim.new(0, 8)
+pickupCorner.Parent = pickupBtn
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Name = "Close"
@@ -212,6 +244,10 @@ local cameraMove = {
 local hiddenGuiStates = {}
 local savedCameraType = camera.CameraType
 local savedCameraCF = camera.CFrame
+local forceCursorMode = false
+local cursorHotkey = "Ctrl+M"
+local lastCollectedInfo = nil
+local lastClickedTarget = nil
 
 local flyMode = false
 local flyMove = {
@@ -285,6 +321,54 @@ local function resolveFlyTarget()
 	return root, humanoid, "character"
 end
 
+local function setPickupButtonState()
+	if lastCollectedInfo and lastCollectedInfo.name then
+		pickupBtn.Text = "Лут✓"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(160, 120, 45)
+	else
+		pickupBtn.Text = "Лут"
+		pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
+	end
+end
+
+local function rememberCollected(source, inst, extra)
+	local objectName = inst and inst.Name or "Unknown"
+	local className = inst and inst.ClassName or "Unknown"
+	local fullName = inst and inst:GetFullName() or "Unknown"
+	lastCollectedInfo = {
+		time = os.time(),
+		source = source,
+		name = objectName,
+		className = className,
+		fullName = fullName,
+		extra = extra,
+	}
+	setPickupButtonState()
+	if source ~= "Character.Touched" then
+		local stamp = os.date("%H:%M:%S", lastCollectedInfo.time)
+		openWindow(("%s\n%s (%s)\n[%s]"):format(source, objectName, className, stamp), "Лут обновлён")
+	end
+end
+
+local function formatLastCollectedInfo()
+	if not lastCollectedInfo then
+		return "Пока ничего не зафиксировано.\n\nПодбери объект (например монетку), затем нажми кнопку Лут.", "Последний подбор"
+	end
+
+	local stamp = os.date("%H:%M:%S", lastCollectedInfo.time)
+	local lines = {
+		("Время: %s"):format(stamp),
+		("Источник: %s"):format(lastCollectedInfo.source),
+		("Name: %s"):format(lastCollectedInfo.name),
+		("ClassName: %s"):format(lastCollectedInfo.className),
+		("FullName: %s"):format(lastCollectedInfo.fullName),
+	}
+	if lastCollectedInfo.extra then
+		table.insert(lines, ("Детали: %s"):format(lastCollectedInfo.extra))
+	end
+	return table.concat(lines, "\n"), "Последний подбор"
+end
+
 local function stopFlyMode()
 	if not flyMode then return end
 	flyMode = false
@@ -342,6 +426,33 @@ local function startFlyMode()
 	flyGyro.Parent = flyTargetPart
 end
 
+local function setCursorButtonState()
+	if forceCursorMode then
+		cursorBtn.Text = "Курсор: ON"
+		cursorBtn.BackgroundColor3 = Color3.fromRGB(55, 150, 95)
+	else
+		cursorBtn.Text = "Курсор"
+		cursorBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+	end
+end
+
+local function applyCursorState()
+	if forceCursorMode then
+		rotateActive = false
+		UIS.MouseBehavior = Enum.MouseBehavior.Default
+		UIS.MouseIconEnabled = true
+		return
+	end
+
+	if cameraMode and rotateActive then
+		UIS.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+		UIS.MouseIconEnabled = false
+	else
+		UIS.MouseBehavior = Enum.MouseBehavior.Default
+		UIS.MouseIconEnabled = true
+	end
+end
+
 local function setServerUiVisible(visible)
 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
 	if not playerGui then return end
@@ -370,8 +481,7 @@ local function stopCameraMode()
 	rotateActive = false
 	cameraBtn.Text = "Камера"
 	cameraBtn.BackgroundColor3 = Color3.fromRGB(55, 110, 180)
-	UIS.MouseBehavior = Enum.MouseBehavior.Default
-	UIS.MouseIconEnabled = true
+	applyCursorState()
 	camera.CameraType = savedCameraType
 	camera.CFrame = savedCameraCF
 	setServerUiVisible(true)
@@ -388,8 +498,7 @@ local function startCameraMode()
 	yaw = math.atan2(-look.X, -look.Z)
 	pitch = math.asin(math.clamp(look.Y, -0.99, 0.99))
 	camera.CameraType = Enum.CameraType.Scriptable
-	UIS.MouseBehavior = Enum.MouseBehavior.Default
-	UIS.MouseIconEnabled = true
+	applyCursorState()
 	setServerUiVisible(false)
 end
 
@@ -409,11 +518,24 @@ local function shutdownScript()
 	end
 end
 
+setCursorButtonState()
+setPickupButtonState()
 closeBtn.MouseButton1Click:Connect(shutdownScript)
 
 -- Закрытие по ESC
 connect(UIS.InputBegan, function(input, gp)
 	if gp or not running then return end
+
+	local isCtrlDown = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+	if input.KeyCode == Enum.KeyCode.M and isCtrlDown then
+		forceCursorMode = not forceCursorMode
+		setCursorButtonState()
+		applyCursorState()
+		local state = forceCursorMode and "включен" or "выключен"
+		openWindow(("Режим свободного курсора %s. Горячая клавиша: %s"):format(state, cursorHotkey), "Курсор")
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.Escape then
 		shutdownScript()
 	end
@@ -427,6 +549,21 @@ connect(cameraBtn.MouseButton1Click, function()
 	else
 		startCameraMode()
 	end
+end)
+
+connect(cursorBtn.MouseButton1Click, function()
+	if not running then return end
+	forceCursorMode = not forceCursorMode
+	setCursorButtonState()
+	applyCursorState()
+	local state = forceCursorMode and "включен" or "выключен"
+	openWindow(("Режим свободного курсора %s. Горячая клавиша: %s"):format(state, cursorHotkey), "Курсор")
+end)
+
+connect(pickupBtn.MouseButton1Click, function()
+	if not running then return end
+	local text, header = formatLastCollectedInfo()
+	openWindow(text, header)
 end)
 
 connect(xyzBtn.MouseButton1Click, function()
@@ -457,6 +594,98 @@ connect(wingsBtn.MouseButton1Click, function()
 		stopFlyMode()
 	else
 		startFlyMode()
+	end
+end)
+
+local function hookCharacterTracking(character)
+	if not character then return end
+
+	connect(character.ChildAdded, function(child)
+		if not running then return end
+		if child:IsA("Accessory") or child:IsA("Tool") then
+			rememberCollected("Character.ChildAdded", child, "Новый предмет применён к персонажу")
+		end
+	end)
+end
+
+local function hookCharacterTouchTracking(character)
+	for _, desc in ipairs(character:GetDescendants()) do
+		if desc:IsA("BasePart") then
+			connect(desc.Touched, function(hit)
+				if not running or not hit then return end
+				if hit:IsDescendantOf(character) then return end
+				rememberCollected("Character.Touched", hit, "Касание персонажа")
+			end)
+		end
+	end
+
+	connect(character.DescendantAdded, function(desc)
+		if not running then return end
+		if desc:IsA("BasePart") then
+			connect(desc.Touched, function(hit)
+				if not running or not hit then return end
+				if hit:IsDescendantOf(character) then return end
+				rememberCollected("Character.Touched", hit, "Касание персонажа")
+			end)
+		end
+	end)
+end
+
+if player.Character then
+	hookCharacterTracking(player.Character)
+	hookCharacterTouchTracking(player.Character)
+end
+
+connect(player.CharacterAdded, function(character)
+	if not running then return end
+	hookCharacterTracking(character)
+	hookCharacterTouchTracking(character)
+end)
+
+local function hookBackpackTracking(backpackInst)
+	if not backpackInst then return end
+	connect(backpackInst.ChildAdded, function(child)
+		if not running then return end
+		if child:IsA("Tool") then
+			rememberCollected("Backpack.ChildAdded", child, "Предмет попал в рюкзак")
+		end
+	end)
+end
+
+local backpack = player:FindFirstChildOfClass("Backpack")
+if backpack then
+	hookBackpackTracking(backpack)
+end
+
+connect(player.ChildAdded, function(child)
+	if not running then return end
+	if child:IsA("Backpack") then
+		hookBackpackTracking(child)
+	end
+end)
+
+connect(workspace.DescendantRemoving, function(inst)
+	if not running then return end
+	if not inst:IsA("BasePart") and not inst:IsA("Model") and not inst:IsA("Tool") then
+		return
+	end
+
+	local root = getRootPart()
+	if not root then return end
+
+	local part = inst:IsA("BasePart") and inst or inst:IsA("Model") and inst.PrimaryPart
+	if not part and (inst:IsA("Model") or inst:IsA("Tool")) then
+		part = inst:FindFirstChildWhichIsA("BasePart", true)
+	end
+	if not part then return end
+
+	local distance = (part.Position - root.Position).Magnitude
+	if distance <= 60 then
+		local extra = ("Удалён рядом с игроком (dist=%.1f)"):format(distance)
+		if lastClickedTarget and (inst == lastClickedTarget or inst:IsDescendantOf(lastClickedTarget) or lastClickedTarget:IsDescendantOf(inst)) then
+			extra = extra .. ", совпал с последним кликом"
+		end
+		rememberCollected("Workspace.DescendantRemoving", inst, extra)
 	end
 end)
 
@@ -492,13 +721,21 @@ end)
 -- =========================
 local function toStr(v)
 	local t = typeof(v)
-	if t == "Vector3" then
+	if t == "number" then
+		return string.format("%.6f", v)
+	elseif t == "boolean" then
+		return v and "true" or "false"
+	elseif t == "Vector3" then
 		return string.format("Vector3(%.3f, %.3f, %.3f)", v.X, v.Y, v.Z)
 	elseif t == "Color3" then
 		return string.format("Color3(%.3f, %.3f, %.3f)", v.R, v.G, v.B)
 	elseif t == "CFrame" then
 		local p = v.Position
 		return string.format("CFrame(pos=%.3f, %.3f, %.3f)", p.X, p.Y, p.Z)
+	elseif t == "Vector2" then
+		return string.format("Vector2(%.3f, %.3f)", v.X, v.Y)
+	elseif t == "UDim2" then
+		return string.format("UDim2(%.3f, %d, %.3f, %d)", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
 	elseif t == "Instance" then
 		return v:GetFullName()
 	end
@@ -518,9 +755,15 @@ local function buildInfo(inst)
 	if inst:IsA("BasePart") then
 		table.insert(lines, "[BasePart]")
 		table.insert(lines, ("Position: %s"):format(toStr(inst.Position)))
+		table.insert(lines, ("Orientation: %s"):format(toStr(inst.Orientation)))
+		table.insert(lines, ("CFrame: %s"):format(toStr(inst.CFrame)))
 		table.insert(lines, ("Size: %s"):format(toStr(inst.Size)))
+		table.insert(lines, ("Mass: %s"):format(toStr(inst.AssemblyMass)))
+		table.insert(lines, ("Velocity: %s"):format(toStr(inst.AssemblyLinearVelocity)))
 		table.insert(lines, ("Anchored: %s"):format(tostring(inst.Anchored)))
 		table.insert(lines, ("CanCollide: %s"):format(tostring(inst.CanCollide)))
+		table.insert(lines, ("CanTouch: %s"):format(tostring(inst.CanTouch)))
+		table.insert(lines, ("CanQuery: %s"):format(tostring(inst.CanQuery)))
 		table.insert(lines, ("Transparency: %s"):format(toStr(inst.Transparency)))
 		table.insert(lines, ("Material: %s"):format(tostring(inst.Material)))
 		table.insert(lines, ("Color: %s"):format(toStr(inst.Color)))
@@ -531,7 +774,13 @@ local function buildInfo(inst)
 	local attrs = inst:GetAttributes()
 	table.insert(lines, "[Attributes]")
 	local anyAttr = false
-	for k, v in pairs(attrs) do
+	local attrKeys = {}
+	for k in pairs(attrs) do
+		table.insert(attrKeys, k)
+	end
+	table.sort(attrKeys)
+	for _, k in ipairs(attrKeys) do
+		local v = attrs[k]
 		anyAttr = true
 		table.insert(lines, ("- %s = %s (%s)"):format(k, toStr(v), typeof(v)))
 	end
@@ -542,6 +791,7 @@ local function buildInfo(inst)
 
 	table.insert(lines, "[Tags]")
 	local tags = CollectionService:GetTags(inst)
+	table.sort(tags)
 	if #tags == 0 then
 		table.insert(lines, "- (none)")
 	else
@@ -552,6 +802,12 @@ local function buildInfo(inst)
 	table.insert(lines, "")
 
 	local children = inst:GetChildren()
+	table.sort(children, function(a, b)
+		if a.Name == b.Name then
+			return a.ClassName < b.ClassName
+		end
+		return a.Name < b.Name
+	end)
 	table.insert(lines, ("[Children] count=%d"):format(#children))
 	local maxShow = math.min(#children, 30)
 	for i = 1, maxShow do
@@ -572,15 +828,37 @@ end
 -- =========================
 -- Клик по объекту в мире
 -- =========================
-local mouse = player:GetMouse()
+local function getTargetUnderCursor()
+	local mousePos = UIS:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Blacklist
+	params.RespectCanCollide = false
+	params.IgnoreWater = false
+
+	local ignore = {}
+	if player.Character then
+		table.insert(ignore, player.Character)
+	end
+	params.FilterDescendantsInstances = ignore
+
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+	if result then
+		return result.Instance
+	end
+
+	local mouse = player:GetMouse()
+	return mouse.Target
+end
 
 connect(UIS.InputBegan, function(input, gameProcessed)
 	if not running or gameProcessed then return end
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
-	local target = mouse.Target
+	local target = getTargetUnderCursor()
 	if not target then return end
 
+	lastClickedTarget = target
 	local header = ("%s (%s)"):format(target.Name, target.ClassName)
 	openWindow(buildInfo(target), header)
 end)
@@ -611,8 +889,7 @@ connect(UIS.InputBegan, function(input, gameProcessed)
 
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		rotateActive = true
-		UIS.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
-		UIS.MouseIconEnabled = false
+		applyCursorState()
 	end
 end)
 
@@ -640,8 +917,7 @@ connect(UIS.InputEnded, function(input)
 
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		rotateActive = false
-		UIS.MouseBehavior = Enum.MouseBehavior.Default
-		UIS.MouseIconEnabled = true
+		applyCursorState()
 	end
 end)
 
