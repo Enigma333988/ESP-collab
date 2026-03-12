@@ -11,6 +11,7 @@ local TELEPORT_MIN_RADIUS = 18 -- минимальная дистанция те
 local TELEPORT_MAX_RADIUS = 26 -- максимальная дистанция телепорта от монеты
 local REPATH_INTERVAL = 0.1 -- как часто обновлять MoveTo
 local TOUCH_DISTANCE = 3.5 -- имитация касания только когда уже почти дошли до монеты
+local FORCE_COLLECT_TIMEOUT = 1 -- если за 1 сек не собрали, форсим телепорт прямо в монету
 
 local enabled = true
 
@@ -60,6 +61,25 @@ local function collectByTouch(rootPart, coin)
     end)
 end
 
+local function forceCollectCoin(rootPart, humanoid, coin)
+    local deadline = time() + 1
+
+    while coinAlive(coin) and time() < deadline do
+        rootPart.CFrame = CFrame.new(coin.Position + Vector3.new(0, 1, 0), coin.Position)
+        humanoid:MoveTo(coin.Position)
+
+        pcall(function()
+            if firetouchinterest then
+                firetouchinterest(rootPart, coin, 0)
+                task.wait()
+                firetouchinterest(rootPart, coin, 1)
+            end
+        end)
+
+        task.wait(0.05)
+    end
+end
+
 local function getTeleportTarget(rootPart, coin)
     local toRoot = rootPart.Position - coin.Position
     local flat = Vector3.new(toRoot.X, 0, toRoot.Z)
@@ -88,16 +108,25 @@ local function approachAndCollect(coin)
     end
 
     teleportNearCoin(rootPart, coin)
+    local teleportTime = time()
+    local forceMode = false
 
     while enabled and coinAlive(coin) do
         if not rootPart.Parent or not humanoid.Parent then
             _, humanoid, rootPart = getCharacterParts()
             teleportNearCoin(rootPart, coin)
+            teleportTime = time()
+            forceMode = false
         end
 
-        humanoid:MoveTo(coin.Position)
-        collectByTouch(rootPart, coin)
-        task.wait(REPATH_INTERVAL)
+        if not forceMode and (time() - teleportTime) >= FORCE_COLLECT_TIMEOUT then
+            forceMode = true
+            forceCollectCoin(rootPart, humanoid, coin)
+        else
+            humanoid:MoveTo(coin.Position)
+            collectByTouch(rootPart, coin)
+            task.wait(REPATH_INTERVAL)
+        end
     end
 end
 
