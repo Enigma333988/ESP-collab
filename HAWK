@@ -1,13 +1,17 @@
 -- HAWK: авто-сбор монет (Coin MeshPart)
--- Логика: телепорт рядом с монетой -> подойти к ней -> дождаться сбора -> следующая монета.
+-- Логика: телепорт подальше от монеты -> подойти к ней -> дождаться сбора -> следующая монета.
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local COIN_NAME = "Coin"
-local APPROACH_RADIUS = 4 -- на каком расстоянии от монеты появляться
+local TELEPORT_MIN_RADIUS = 12 -- минимальная дистанция телепорта от монеты
+local TELEPORT_MAX_RADIUS = 18 -- максимальная дистанция телепорта от монеты
 local REPATH_INTERVAL = 0.1 -- как часто обновлять MoveTo
+
+local enabled = true
 
 local function isCoin(instance)
     return instance and instance:IsA("MeshPart") and instance.Name == COIN_NAME
@@ -51,17 +55,23 @@ local function collectByTouch(rootPart, coin)
     end)
 end
 
-local function teleportNearCoin(rootPart, coin)
+local function getTeleportTarget(rootPart, coin)
     local toRoot = rootPart.Position - coin.Position
     local flat = Vector3.new(toRoot.X, 0, toRoot.Z)
 
     if flat.Magnitude < 0.1 then
-        flat = Vector3.new(1, 0, 0)
+        local angle = math.rad(math.random(0, 359))
+        flat = Vector3.new(math.cos(angle), 0, math.sin(angle))
+    else
+        flat = flat.Unit
     end
 
-    local offset = flat.Unit * APPROACH_RADIUS
-    local targetPos = coin.Position + offset + Vector3.new(0, 2, 0)
+    local radius = math.random(TELEPORT_MIN_RADIUS, TELEPORT_MAX_RADIUS)
+    return coin.Position + flat * radius + Vector3.new(0, 2, 0)
+end
 
+local function teleportNearCoin(rootPart, coin)
+    local targetPos = getTeleportTarget(rootPart, coin)
     rootPart.CFrame = CFrame.new(targetPos, coin.Position)
 end
 
@@ -74,8 +84,7 @@ local function approachAndCollect(coin)
 
     teleportNearCoin(rootPart, coin)
 
-    -- Без фиксированной задержки: идем к монете до момента, пока она не исчезнет (соберется).
-    while coinAlive(coin) do
+    while enabled and coinAlive(coin) do
         if not rootPart.Parent or not humanoid.Parent then
             _, humanoid, rootPart = getCharacterParts()
             teleportNearCoin(rootPart, coin)
@@ -83,9 +92,104 @@ local function approachAndCollect(coin)
 
         humanoid:MoveTo(coin.Position)
         collectByTouch(rootPart, coin)
-
         task.wait(REPATH_INTERVAL)
     end
+end
+
+local function createToggleUI()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+    local oldGui = playerGui:FindFirstChild("HAWKCoinCollectorUI")
+    if oldGui then
+        oldGui:Destroy()
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "HAWKCoinCollectorUI"
+    gui.ResetOnSpawn = false
+    gui.Parent = playerGui
+
+    local window = Instance.new("Frame")
+    window.Name = "Window"
+    window.Size = UDim2.fromOffset(300, 130)
+    window.Position = UDim2.fromScale(0.03, 0.25)
+    window.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    window.BorderSizePixel = 0
+    window.Active = true
+    window.Parent = gui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -16, 0, 32)
+    title.Position = UDim2.fromOffset(8, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "HAWK Coin Collector"
+    title.TextScaled = true
+    title.Font = Enum.Font.GothamBold
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Parent = window
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleButton"
+    toggleBtn.Size = UDim2.new(1, -16, 0, 72)
+    toggleBtn.Position = UDim2.fromOffset(8, 46)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleBtn.TextScaled = true
+    toggleBtn.Font = Enum.Font.GothamBlack
+    toggleBtn.Parent = window
+
+    local function refreshButton()
+        if enabled then
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+            toggleBtn.Text = "ВКЛ"
+        else
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+            toggleBtn.Text = "ВЫКЛ"
+        end
+    end
+
+    toggleBtn.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        refreshButton()
+    end)
+
+    refreshButton()
+
+    local dragging = false
+    local dragStart
+    local startPos
+
+    window.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = window.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then
+            return
+        end
+
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+
+        local delta = input.Position - dragStart
+        window.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end)
 end
 
 Workspace.DescendantRemoving:Connect(function(descendant)
@@ -94,13 +198,19 @@ Workspace.DescendantRemoving:Connect(function(descendant)
     end
 end)
 
-while true do
-    local _, _, rootPart = getCharacterParts()
-    local coin = getNearestCoin(rootPart.Position)
+createToggleUI()
 
-    if coin then
-        approachAndCollect(coin)
-    else
+while true do
+    if not enabled then
         task.wait(0.2)
+    else
+        local _, _, rootPart = getCharacterParts()
+        local coin = getNearestCoin(rootPart.Position)
+
+        if coin then
+            approachAndCollect(coin)
+        else
+            task.wait(0.2)
+        end
     end
 end
