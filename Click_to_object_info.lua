@@ -51,7 +51,7 @@ topCorner.Parent = topBar
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -506, 1, 0)
+title.Size = UDim2.new(1, -586, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamSemibold
@@ -140,6 +140,22 @@ cursorBtn.Parent = topBar
 local cursorCorner = Instance.new("UICorner")
 cursorCorner.CornerRadius = UDim.new(0, 8)
 cursorCorner.Parent = cursorBtn
+
+local pickupBtn = Instance.new("TextButton")
+pickupBtn.Name = "Pickup"
+pickupBtn.Size = UDim2.fromOffset(64, 26)
+pickupBtn.Position = UDim2.new(1, -482, 0.5, -13)
+pickupBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 35)
+pickupBtn.BorderSizePixel = 0
+pickupBtn.Font = Enum.Font.GothamSemibold
+pickupBtn.TextSize = 13
+pickupBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+pickupBtn.Text = "Лут"
+pickupBtn.Parent = topBar
+
+local pickupCorner = Instance.new("UICorner")
+pickupCorner.CornerRadius = UDim.new(0, 8)
+pickupCorner.Parent = pickupBtn
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Name = "Close"
@@ -230,6 +246,8 @@ local savedCameraType = camera.CameraType
 local savedCameraCF = camera.CFrame
 local forceCursorMode = false
 local cursorHotkey = "Ctrl+M"
+local lastCollectedInfo = nil
+local lastClickedTarget = nil
 
 local flyMode = false
 local flyMove = {
@@ -303,6 +321,38 @@ local function resolveFlyTarget()
 	return root, humanoid, "character"
 end
 
+local function rememberCollected(source, inst, extra)
+	local objectName = inst and inst.Name or "Unknown"
+	local className = inst and inst.ClassName or "Unknown"
+	local fullName = inst and inst:GetFullName() or "Unknown"
+	lastCollectedInfo = {
+		time = os.time(),
+		source = source,
+		name = objectName,
+		className = className,
+		fullName = fullName,
+		extra = extra,
+	}
+end
+
+local function formatLastCollectedInfo()
+	if not lastCollectedInfo then
+		return "Пока ничего не зафиксировано.\n\nПодбери объект (например монетку), затем нажми кнопку Лут.", "Последний подбор"
+	end
+
+	local stamp = os.date("%H:%M:%S", lastCollectedInfo.time)
+	local lines = {
+		("Время: %s"):format(stamp),
+		("Источник: %s"):format(lastCollectedInfo.source),
+		("Name: %s"):format(lastCollectedInfo.name),
+		("ClassName: %s"):format(lastCollectedInfo.className),
+		("FullName: %s"):format(lastCollectedInfo.fullName),
+	}
+	if lastCollectedInfo.extra then
+		table.insert(lines, ("Детали: %s"):format(lastCollectedInfo.extra))
+	end
+	return table.concat(lines, "\n"), "Последний подбор"
+end
 local function stopFlyMode()
 	if not flyMode then return end
 	flyMode = false
@@ -493,6 +543,12 @@ connect(cursorBtn.MouseButton1Click, function()
 	openWindow(("Режим свободного курсора %s. Горячая клавиша: %s"):format(state, cursorHotkey), "Курсор")
 end)
 
+connect(pickupBtn.MouseButton1Click, function()
+	if not running then return end
+	local text, header = formatLastCollectedInfo()
+	openWindow(text, header)
+end)
+
 connect(xyzBtn.MouseButton1Click, function()
 	if not running then return end
 	local cframeText, lookText = formatCameraCFrame(camera.CFrame)
@@ -521,6 +577,73 @@ connect(wingsBtn.MouseButton1Click, function()
 		stopFlyMode()
 	else
 		startFlyMode()
+	end
+end)
+
+local function hookCharacterTracking(character)
+	if not character then return end
+
+	connect(character.ChildAdded, function(child)
+		if not running then return end
+		if child:IsA("Accessory") or child:IsA("Tool") then
+			rememberCollected("Character.ChildAdded", child, "Новый предмет применён к персонажу")
+		end
+	end)
+end
+
+if player.Character then
+	hookCharacterTracking(player.Character)
+end
+
+connect(player.CharacterAdded, function(character)
+	if not running then return end
+	hookCharacterTracking(character)
+end)
+
+local function hookBackpackTracking(backpackInst)
+	if not backpackInst then return end
+	connect(backpackInst.ChildAdded, function(child)
+		if not running then return end
+		if child:IsA("Tool") then
+			rememberCollected("Backpack.ChildAdded", child, "Предмет попал в рюкзак")
+		end
+	end)
+end
+
+local backpack = player:FindFirstChildOfClass("Backpack")
+if backpack then
+	hookBackpackTracking(backpack)
+end
+
+connect(player.ChildAdded, function(child)
+	if not running then return end
+	if child:IsA("Backpack") then
+		hookBackpackTracking(child)
+	end
+end)
+
+connect(workspace.DescendantRemoving, function(inst)
+	if not running then return end
+	if not inst:IsA("BasePart") and not inst:IsA("Model") and not inst:IsA("Tool") then
+		return
+	end
+
+	local root = getRootPart()
+	if not root then return end
+
+	local part = inst:IsA("BasePart") and inst or inst:IsA("Model") and inst.PrimaryPart
+	if not part and (inst:IsA("Model") or inst:IsA("Tool")) then
+		part = inst:FindFirstChildWhichIsA("BasePart", true)
+	end
+	if not part then return end
+
+	local distance = (part.Position - root.Position).Magnitude
+	if distance <= 20 then
+		local extra = ("Удалён рядом с игроком (dist=%.1f)"):format(distance)
+		if lastClickedTarget and (inst == lastClickedTarget or inst:IsDescendantOf(lastClickedTarget) or lastClickedTarget:IsDescendantOf(inst)) then
+			extra = extra .. ", совпал с последним кликом"
+		end
+		rememberCollected("Workspace.DescendantRemoving", inst, extra)
 	end
 end)
 
@@ -693,6 +816,7 @@ connect(UIS.InputBegan, function(input, gameProcessed)
 	local target = getTargetUnderCursor()
 	if not target then return end
 
+	lastClickedTarget = target
 	local header = ("%s (%s)"):format(target.Name, target.ClassName)
 	openWindow(buildInfo(target), header)
 end)
