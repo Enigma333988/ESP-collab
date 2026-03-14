@@ -26,8 +26,7 @@ local SETTINGS = {
     AssistEnabled = true,
     AssistHoldMouseButton2 = true,
     AimBotEnabled = false,
-    AimBotTeleport = true,
-    AimBotTeleportOffset = Vector3.new(0, 0, 3),
+    AimBotFollowDistance = 2,
     MinRadius = 30,
     MaxRadius = 350,
     CaptureRadius = 130,
@@ -48,6 +47,7 @@ local scriptActive = true
 local draggingWindow = false
 local dragStartMouse = nil
 local dragStartPos = nil
+local aimBotLockedPlayer = nil
 
 local uiRefs = {
     toggleEspButton = nil,
@@ -345,17 +345,18 @@ local function getClosestEnemyHeadInCircle()
     return nearestHead
 end
 
-local function getClosestEnemyHeadToCrosshair()
+local function getClosestEnemyToCrosshair()
     local camera = getCurrentCamera()
     local myCharacter = getCharacter(LocalPlayer)
 
     if not camera or not myCharacter or not isAlive(myCharacter) then
-        return nil
+        return nil, nil
     end
 
     local viewportSize = camera.ViewportSize
     local crosshair = Vector2.new(viewportSize.X * 0.5, viewportSize.Y * 0.5)
 
+    local nearestPlayer = nil
     local nearestHead = nil
     local nearestScreenDistance = math.huge
 
@@ -373,6 +374,7 @@ local function getClosestEnemyHeadToCrosshair()
 
                     if screenDistance < nearestScreenDistance then
                         nearestScreenDistance = screenDistance
+                        nearestPlayer = player
                         nearestHead = head
                     end
                 end
@@ -380,29 +382,44 @@ local function getClosestEnemyHeadToCrosshair()
         end
     end
 
-    return nearestHead
+    return nearestPlayer, nearestHead
 end
 
-local function teleportToTargetHead(targetHead)
-    if not SETTINGS.AimBotTeleport or not targetHead then
-        return
+local function clearAimBotLock()
+    aimBotLockedPlayer = nil
+end
+
+local function followTargetBehind(targetPlayer)
+    if not targetPlayer then
+        return nil
+    end
+
+    local targetCharacter = getCharacter(targetPlayer)
+    if not targetCharacter or not isAlive(targetCharacter) then
+        return nil
+    end
+
+    local targetHead = getHead(targetCharacter)
+    local targetRoot = getRoot(targetCharacter)
+    if not targetHead or not targetRoot then
+        return nil
     end
 
     local myCharacter = getCharacter(LocalPlayer)
     local myRoot = getRoot(myCharacter)
     if not myRoot then
-        return
+        return nil
     end
 
-    local desiredCFrame = targetHead.CFrame * CFrame.new(SETTINGS.AimBotTeleportOffset)
-    myRoot.CFrame = CFrame.new(desiredCFrame.Position, targetHead.Position)
+    local behindPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * SETTINGS.AimBotFollowDistance)
+    myRoot.CFrame = CFrame.new(behindPosition, targetHead.Position)
+
+    return targetHead
 end
 
 local function updateAssist()
-    local useAimBot = SETTINGS.AimBotEnabled
-    local shouldAssist = SETTINGS.AssistEnabled and (useAimBot or aimHoldingRMB)
-
-    if not shouldAssist then
+    if not SETTINGS.AssistEnabled then
+        clearAimBotLock()
         return
     end
 
@@ -411,7 +428,34 @@ local function updateAssist()
         return
     end
 
-    local targetHead = useAimBot and getClosestEnemyHeadToCrosshair() or getClosestEnemyHeadInCircle()
+    if SETTINGS.AimBotEnabled then
+        if not aimHoldingRMB then
+            clearAimBotLock()
+            return
+        end
+
+        if not aimBotLockedPlayer then
+            local nearestPlayer = getClosestEnemyToCrosshair()
+            aimBotLockedPlayer = nearestPlayer
+        end
+
+        local targetHead = followTargetBehind(aimBotLockedPlayer)
+        if not targetHead then
+            clearAimBotLock()
+            return
+        end
+
+        camera.CFrame = CFrame.new(camera.CFrame.Position, targetHead.Position)
+        return
+    end
+
+    clearAimBotLock()
+
+    if not aimHoldingRMB then
+        return
+    end
+
+    local targetHead = getClosestEnemyHeadInCircle()
     if not targetHead then
         return
     end
@@ -473,6 +517,7 @@ local function shutdownScript()
     draggingWindow = false
     SETTINGS.ESPEnabled = false
     SETTINGS.AssistEnabled = false
+    clearAimBotLock()
 
     for _, player in ipairs(Players:GetPlayers()) do
         cleanupPlayer(player)
@@ -619,7 +664,7 @@ local function createUi()
     hint.TextSize = 12
     hint.TextColor3 = Color3.fromRGB(170, 170, 170)
     hint.TextXAlignment = Enum.TextXAlignment.Left
-    hint.Text = "Удерживайте ПКМ для assist"
+    hint.Text = "ПКМ: фикс цели и следование за спиной (2м)"
     hint.Parent = panel
 
     uiRefs.captureCircle = Instance.new("Frame")
@@ -709,6 +754,9 @@ local function createUi()
         end
 
         SETTINGS.AimBotEnabled = not SETTINGS.AimBotEnabled
+        if not SETTINGS.AimBotEnabled then
+            clearAimBotLock()
+        end
         updateToggleButton(uiRefs.toggleAimBotButton, "AimBot", SETTINGS.AimBotEnabled)
     end))
 
@@ -771,6 +819,7 @@ addConnection(UserInputService.InputEnded:Connect(function(input)
 
     if input.UserInputType == Enum.UserInputType.MouseButton2 then
         aimHoldingRMB = false
+        clearAimBotLock()
     end
 end))
 
@@ -809,6 +858,7 @@ addConnection(RunService.RenderStepped:Connect(function(deltaTime)
     if SETTINGS.AssistHoldMouseButton2 then
         aimHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     end
+
 
     updateRadiusUI()
     updateAssist()
