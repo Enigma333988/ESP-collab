@@ -460,6 +460,10 @@ local function updateAssist()
         return
     end
 
+    if useAimBot then
+        teleportToTargetHead(targetHead)
+    end
+
     local cameraPosition = camera.CFrame.Position
     camera.CFrame = CFrame.new(cameraPosition, targetHead.Position)
 end
