@@ -25,6 +25,9 @@ local SETTINGS = {
 
     AssistEnabled = true,
     AssistHoldMouseButton2 = true,
+    AimBotEnabled = false,
+    AimBotTeleport = true,
+    AimBotTeleportDistance = 10,
     MinRadius = 30,
     MaxRadius = 350,
     CaptureRadius = 130,
@@ -45,11 +48,16 @@ local scriptActive = true
 local draggingWindow = false
 local dragStartMouse = nil
 local dragStartPos = nil
+local wasHoldingRMB = false
+
+local aimBotReturnCFrame = nil
+local aimBotHasTeleported = false
 
 local uiRefs = {
     toggleEspButton = nil,
     toggleTeamButton = nil,
     toggleAssistButton = nil,
+    toggleAimBotButton = nil,
     toggleInfoButton = nil,
     radiusLabel = nil,
     sliderBar = nil,
@@ -341,13 +349,113 @@ local function getClosestEnemyHeadInCircle()
     return nearestHead
 end
 
+local function getClosestEnemyHeadToCrosshair()
+    local camera = getCurrentCamera()
+    local myCharacter = getCharacter(LocalPlayer)
+
+    if not camera or not myCharacter or not isAlive(myCharacter) then
+        return nil
+    end
+
+    local viewportSize = camera.ViewportSize
+    local crosshair = Vector2.new(viewportSize.X * 0.5, viewportSize.Y * 0.5)
+
+    local nearestHead = nil
+    local nearestScreenDistance = math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isEnemy(player) then
+            local character = getCharacter(player)
+            local head = getHead(character)
+
+            if head and isAlive(character) then
+                local headScreenPoint, isOnScreen = camera:WorldToViewportPoint(head.Position)
+
+                if isOnScreen and headScreenPoint.Z > 0 then
+                    local headPoint2D = Vector2.new(headScreenPoint.X, headScreenPoint.Y)
+                    local screenDistance = (headPoint2D - crosshair).Magnitude
+
+                    if screenDistance < nearestScreenDistance then
+                        nearestScreenDistance = screenDistance
+                        nearestHead = head
+                    end
+                end
+            end
+        end
+    end
+
+    return nearestHead
+end
+
+local function restoreAimBotPosition()
+    if not aimBotHasTeleported then
+        return
+    end
+
+    local myCharacter = getCharacter(LocalPlayer)
+    local myRoot = getRoot(myCharacter)
+    if myRoot and aimBotReturnCFrame then
+        myRoot.CFrame = aimBotReturnCFrame
+    end
+
+    aimBotReturnCFrame = nil
+    aimBotHasTeleported = false
+end
+
+local function teleportAroundTargetHead(targetHead)
+    if not SETTINGS.AimBotTeleport or not targetHead or aimBotHasTeleported then
+        return
+    end
+
+    local myCharacter = getCharacter(LocalPlayer)
+    local myRoot = getRoot(myCharacter)
+    if not myRoot then
+        return
+    end
+
+    aimBotReturnCFrame = myRoot.CFrame
+
+    local radius = SETTINGS.AimBotTeleportDistance
+    local angle = math.random() * math.pi * 2
+    local horizontalOffset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+    local teleportPosition = targetHead.Position + horizontalOffset
+
+    myRoot.CFrame = CFrame.new(teleportPosition, targetHead.Position)
+    aimBotHasTeleported = true
+end
+
 local function updateAssist()
-    if not SETTINGS.AssistEnabled or not aimHoldingRMB then
+    if not SETTINGS.AssistEnabled then
+        restoreAimBotPosition()
         return
     end
 
     local camera = getCurrentCamera()
     if not camera then
+        return
+    end
+
+    if SETTINGS.AimBotEnabled then
+        if not aimHoldingRMB then
+            restoreAimBotPosition()
+            return
+        end
+
+        local targetHead = getClosestEnemyHeadToCrosshair()
+        if not targetHead then
+            return
+        end
+
+        teleportAroundTargetHead(targetHead)
+        camera.CFrame = CFrame.new(camera.CFrame.Position, targetHead.Position)
+        return
+    end
+
+    if aimBotHasTeleported then
+        restoreAimBotPosition()
+    end
+
+    if not aimHoldingRMB then
         return
     end
 
@@ -409,6 +517,7 @@ local function shutdownScript()
     draggingWindow = false
     SETTINGS.ESPEnabled = false
     SETTINGS.AssistEnabled = false
+    restoreAimBotPosition()
 
     for _, player in ipairs(Players:GetPlayers()) do
         cleanupPlayer(player)
@@ -435,8 +544,8 @@ local function createUi()
 
     local panel = Instance.new("Frame")
     panel.Name = "Panel"
-    panel.Size = UDim2.new(0, 250, 0, 262)
-    panel.Position = UDim2.new(0, 20, 0.5, -131)
+    panel.Size = UDim2.new(0, 250, 0, 294)
+    panel.Position = UDim2.new(0, 20, 0.5, -147)
     panel.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     panel.BorderSizePixel = 0
     panel.Parent = screenGui
@@ -501,12 +610,13 @@ local function createUi()
     uiRefs.toggleEspButton = createToggleButton("ToggleESP", 36)
     uiRefs.toggleTeamButton = createToggleButton("ToggleTeam", 68)
     uiRefs.toggleAssistButton = createToggleButton("ToggleAssist", 100)
-    uiRefs.toggleInfoButton = createToggleButton("ToggleInfo", 132)
+    uiRefs.toggleAimBotButton = createToggleButton("ToggleAimBot", 132)
+    uiRefs.toggleInfoButton = createToggleButton("ToggleInfo", 164)
 
     uiRefs.radiusLabel = Instance.new("TextLabel")
     uiRefs.radiusLabel.BackgroundTransparency = 1
     uiRefs.radiusLabel.Size = UDim2.new(1, -20, 0, 20)
-    uiRefs.radiusLabel.Position = UDim2.new(0, 10, 0, 170)
+    uiRefs.radiusLabel.Position = UDim2.new(0, 10, 0, 202)
     uiRefs.radiusLabel.Font = Enum.Font.Gotham
     uiRefs.radiusLabel.TextSize = 13
     uiRefs.radiusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
@@ -515,7 +625,7 @@ local function createUi()
 
     uiRefs.sliderBar = Instance.new("Frame")
     uiRefs.sliderBar.Size = UDim2.new(1, -20, 0, 10)
-    uiRefs.sliderBar.Position = UDim2.new(0, 10, 0, 196)
+    uiRefs.sliderBar.Position = UDim2.new(0, 10, 0, 228)
     uiRefs.sliderBar.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
     uiRefs.sliderBar.BorderSizePixel = 0
     uiRefs.sliderBar.Parent = panel
@@ -549,12 +659,12 @@ local function createUi()
     local hint = Instance.new("TextLabel")
     hint.BackgroundTransparency = 1
     hint.Size = UDim2.new(1, -20, 0, 16)
-    hint.Position = UDim2.new(0, 10, 0, 216)
+    hint.Position = UDim2.new(0, 10, 0, 248)
     hint.Font = Enum.Font.Gotham
     hint.TextSize = 12
     hint.TextColor3 = Color3.fromRGB(170, 170, 170)
     hint.TextXAlignment = Enum.TextXAlignment.Left
-    hint.Text = "Удерживайте ПКМ для assist"
+    hint.Text = "ПКМ: Assist/AimBot (телепорт с возвратом)"
     hint.Parent = panel
 
     uiRefs.captureCircle = Instance.new("Frame")
@@ -638,6 +748,18 @@ local function createUi()
         updateRadiusUI()
     end))
 
+    addConnection(uiRefs.toggleAimBotButton.MouseButton1Click:Connect(function()
+        if not scriptActive then
+            return
+        end
+
+        SETTINGS.AimBotEnabled = not SETTINGS.AimBotEnabled
+        if not SETTINGS.AimBotEnabled then
+            restoreAimBotPosition()
+        end
+        updateToggleButton(uiRefs.toggleAimBotButton, "AimBot", SETTINGS.AimBotEnabled)
+    end))
+
     addConnection(uiRefs.toggleInfoButton.MouseButton1Click:Connect(function()
         if not scriptActive then
             return
@@ -651,6 +773,7 @@ local function createUi()
     updateToggleButton(uiRefs.toggleEspButton, "ESP", SETTINGS.ESPEnabled)
     updateToggleButton(uiRefs.toggleTeamButton, "TeamCheck", SETTINGS.TeamCheck)
     updateToggleButton(uiRefs.toggleAssistButton, "Assist", SETTINGS.AssistEnabled)
+    updateToggleButton(uiRefs.toggleAimBotButton, "AimBot", SETTINGS.AimBotEnabled)
     updateToggleButton(uiRefs.toggleInfoButton, "Info", SETTINGS.ShowInfo)
     updateRadiusUI()
 end
@@ -696,6 +819,7 @@ addConnection(UserInputService.InputEnded:Connect(function(input)
 
     if input.UserInputType == Enum.UserInputType.MouseButton2 then
         aimHoldingRMB = false
+        restoreAimBotPosition()
     end
 end))
 
@@ -734,6 +858,11 @@ addConnection(RunService.RenderStepped:Connect(function(deltaTime)
     if SETTINGS.AssistHoldMouseButton2 then
         aimHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     end
+
+    if wasHoldingRMB and not aimHoldingRMB then
+        restoreAimBotPosition()
+    end
+    wasHoldingRMB = aimHoldingRMB
 
     updateRadiusUI()
     updateAssist()
