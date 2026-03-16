@@ -8,12 +8,12 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+local WINDOW_WIDTH = 360
 local WINDOW_EXPANDED_HEIGHT = 200
 local WINDOW_COLLAPSED_HEIGHT = 40
 
 local state = {
     bananaEnabled = false,
-    draggingWindow = false,
     collapsed = false,
 }
 
@@ -67,9 +67,10 @@ local function setStatus(text)
 end
 
 local function applyCollapsedState()
+    local targetHeight = state.collapsed and WINDOW_COLLAPSED_HEIGHT or WINDOW_EXPANDED_HEIGHT
+    ui.window.Size = UDim2.fromOffset(WINDOW_WIDTH, targetHeight)
     ui.content.Visible = not state.collapsed
-    ui.window.Size = UDim2.fromOffset(360, state.collapsed and WINDOW_COLLAPSED_HEIGHT or WINDOW_EXPANDED_HEIGHT)
-    ui.collapseBtn.Text = state.collapsed and "▢" or "—"
+    ui.collapseBtn.Text = state.collapsed and "+" or "−"
 end
 
 -- ---------- UI ----------
@@ -86,8 +87,8 @@ screenGui.Parent = PlayerGui
 ui.screenGui = screenGui
 
 local window = Instance.new("Frame")
-window.Size = UDim2.fromOffset(360, WINDOW_EXPANDED_HEIGHT)
-window.Position = UDim2.new(0.5, -180, 0.5, -100)
+window.Size = UDim2.fromOffset(WINDOW_WIDTH, WINDOW_EXPANDED_HEIGHT)
+window.Position = UDim2.new(0.5, -WINDOW_WIDTH / 2, 0.5, -100)
 window.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 window.BorderSizePixel = 0
 window.Parent = screenGui
@@ -98,14 +99,11 @@ windowCorner.CornerRadius = UDim.new(0, 12)
 windowCorner.Parent = window
 
 local topbar = Instance.new("Frame")
-topbar.Size = UDim2.new(1, 0, 0, 40)
+topbar.Size = UDim2.new(1, 0, 0, WINDOW_COLLAPSED_HEIGHT)
 topbar.BackgroundColor3 = Color3.fromRGB(31, 36, 46)
 topbar.BorderSizePixel = 0
+topbar.Active = true
 topbar.Parent = window
-
-local topCorner = Instance.new("UICorner")
-topCorner.CornerRadius = UDim.new(0, 12)
-topCorner.Parent = topbar
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -140, 1, 0)
@@ -125,7 +123,7 @@ collapseBtn.BackgroundColor3 = Color3.fromRGB(70, 88, 120)
 collapseBtn.BorderSizePixel = 0
 collapseBtn.Font = Enum.Font.GothamBold
 collapseBtn.TextSize = 16
-collapseBtn.Text = "—"
+collapseBtn.Text = "−"
 collapseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 collapseBtn.Parent = topbar
 ui.collapseBtn = collapseBtn
@@ -150,8 +148,8 @@ closeCorner.CornerRadius = UDim.new(0, 8)
 closeCorner.Parent = closeBtn
 
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1, 0, 1, -40)
-content.Position = UDim2.fromOffset(0, 40)
+content.Size = UDim2.new(1, 0, 1, -WINDOW_COLLAPSED_HEIGHT)
+content.Position = UDim2.fromOffset(0, WINDOW_COLLAPSED_HEIGHT)
 content.BackgroundTransparency = 1
 content.Parent = window
 ui.content = content
@@ -203,25 +201,48 @@ local statusCorner = Instance.new("UICorner")
 statusCorner.CornerRadius = UDim.new(0, 8)
 statusCorner.Parent = statusBar
 
-local dragStart, startPos
+-- drag window (works in expanded and collapsed state)
+local dragging = false
+local dragStart
+local startPos
+local dragInput
 
 topbar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingWindow = true
+        dragging = true
         dragStart = input.Position
         startPos = window.Position
+        dragInput = input
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
     end
 end)
 
-topbar.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingWindow = false
+topbar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        local delta = input.Position - dragStart
+        window.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingWindow = false
+        dragging = false
     end
 end)
 
@@ -246,16 +267,6 @@ closeBtn.MouseButton1Click:Connect(function()
 end)
 
 RunService.RenderStepped:Connect(function()
-    if state.draggingWindow and dragStart and startPos then
-        local delta = UserInputService:GetMouseLocation() - dragStart
-        window.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-
     if state.bananaEnabled then
         collectBananas3()
     end
