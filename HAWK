@@ -1,1 +1,267 @@
+-- HAWK auto-ammo teleport script
+-- Teleports to 4 ammo platforms one by one, presses E, then returns to start position.
 
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+local state = {
+    enabled = false,
+    closed = false,
+    minimized = false,
+    running = false,
+}
+
+local function getRoot()
+    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    return character:WaitForChild("HumanoidRootPart")
+end
+
+local function findTargets()
+    local targets = {}
+
+    for _, desc in ipairs(workspace:GetDescendants()) do
+        if desc:IsA("MeshPart") and desc.Name == "Cube.028_Cube.044" then
+            local parentModel = desc.Parent
+            local dispenserModel = parentModel and parentModel.Parent
+
+            if parentModel and parentModel.Name == "Model" and dispenserModel and dispenserModel:IsA("Model") then
+                local dispenserName = dispenserModel.Name
+                if dispenserName:find("AmmoDispenser") then
+                    table.insert(targets, desc)
+                end
+            end
+        end
+    end
+
+    table.sort(targets, function(a, b)
+        return a:GetFullName() < b:GetFullName()
+    end)
+
+    local result = {}
+    for i = 1, math.min(4, #targets) do
+        result[i] = targets[i]
+    end
+
+    return result
+end
+
+local function pressE()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.08)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+local function teleportTo(part)
+    local root = getRoot()
+    root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
+end
+
+local function runLoop(statusLabel)
+    if state.running then return end
+    state.running = true
+
+    task.spawn(function()
+        while state.enabled and not state.closed do
+            local root = getRoot()
+            local startCFrame = root.CFrame
+
+            local targets = findTargets()
+            if #targets < 4 then
+                statusLabel.Text = "Статус: нужно 4 платформы (найдено " .. tostring(#targets) .. ")"
+                task.wait(1)
+            else
+                statusLabel.Text = "Статус: выполняю обход 4 платформ"
+                for _, target in ipairs(targets) do
+                    if not state.enabled or state.closed then
+                        break
+                    end
+
+                    if target and target.Parent then
+                        teleportTo(target)
+                        task.wait(0.25)
+                        pressE()
+                        task.wait(0.35)
+                    end
+                end
+
+                if state.enabled and not state.closed then
+                    root.CFrame = startCFrame
+                    statusLabel.Text = "Статус: цикл завершён, возврат в исходную точку"
+                    task.wait(0.6)
+                end
+            end
+
+            RunService.Heartbeat:Wait()
+        end
+
+        state.running = false
+        if not state.closed then
+            statusLabel.Text = "Статус: выключено"
+        end
+    end)
+end
+
+local function makeDraggable(topBar, frame)
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPos
+
+    topBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    topBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HAWK_AutoPlatforms"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(340, 190)
+main.Position = UDim2.new(0.5, -170, 0.5, -95)
+main.BackgroundColor3 = Color3.fromRGB(23, 23, 28)
+main.BorderSizePixel = 0
+main.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = main
+
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 36)
+topBar.BackgroundColor3 = Color3.fromRGB(33, 33, 40)
+topBar.BorderSizePixel = 0
+topBar.Parent = main
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 12)
+topCorner.Parent = topBar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -120, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "HAWK Auto Platforms"
+title.TextColor3 = Color3.fromRGB(240, 240, 240)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Font = Enum.Font.GothamSemibold
+title.TextSize = 14
+title.Parent = topBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.fromOffset(30, 24)
+closeBtn.Position = UDim2.new(1, -35, 0, 6)
+closeBtn.BackgroundColor3 = Color3.fromRGB(184, 45, 45)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.Parent = topBar
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.fromOffset(30, 24)
+minimizeBtn.Position = UDim2.new(1, -70, 0, 6)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+minimizeBtn.Text = "_"
+minimizeBtn.TextColor3 = Color3.new(1, 1, 1)
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 14
+minimizeBtn.Parent = topBar
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(1, -20, 0, 42)
+toggleBtn.Position = UDim2.new(0, 10, 0, 52)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 124, 63)
+toggleBtn.Text = "ВКЛЮЧИТЬ"
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 16
+toggleBtn.Parent = main
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 70)
+statusLabel.Position = UDim2.new(0, 10, 0, 104)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextWrapped = true
+statusLabel.TextYAlignment = Enum.TextYAlignment.Top
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 14
+statusLabel.Text = "Статус: выключено"
+statusLabel.Parent = main
+
+makeDraggable(topBar, main)
+
+local expandedSize = main.Size
+local collapsedSize = UDim2.fromOffset(340, 36)
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    state.minimized = not state.minimized
+    if state.minimized then
+        main.Size = collapsedSize
+        toggleBtn.Visible = false
+        statusLabel.Visible = false
+        minimizeBtn.Text = "+"
+    else
+        main.Size = expandedSize
+        toggleBtn.Visible = true
+        statusLabel.Visible = true
+        minimizeBtn.Text = "_"
+    end
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    state.enabled = false
+    state.closed = true
+    screenGui:Destroy()
+end)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    state.enabled = not state.enabled
+
+    if state.enabled then
+        toggleBtn.Text = "ВЫКЛЮЧИТЬ"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(177, 65, 65)
+        statusLabel.Text = "Статус: запуск..."
+        runLoop(statusLabel)
+    else
+        toggleBtn.Text = "ВКЛЮЧИТЬ"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 124, 63)
+        statusLabel.Text = "Статус: выключено"
+    end
+end)
