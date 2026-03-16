@@ -1,31 +1,605 @@
--- HAWK: auto-collect Bananas3 by teleporting them to the local player
+-- HAWK Unified ESP Collab Hub
+-- Объединяет: ESP, Info по клику, сбор Bananas3
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local localPlayer = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+local state = {
+    espEnabled = false,
+    espShowNames = true,
+    inspectorEnabled = false,
+    bananaEnabled = false,
+    selectedObject = nil,
+}
+
+local espStorage = {
+    highlights = {},
+    billboards = {},
+}
+
+local ui = {}
+
+-- ---------- helpers ----------
 local function getCharacter()
-    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
-    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
-    return character, humanoidRootPart
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
 
-local function teleportBananas3ToPlayer()
-    local _, rootPart = getCharacter()
-    local prefabs = Workspace:FindFirstChild("Prefabs")
-    if not prefabs then
+local function getRootPart()
+    local character = getCharacter()
+    return character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
+end
+
+local function clearEspForPlayer(player)
+    local h = espStorage.highlights[player]
+    if h then
+        h:Destroy()
+        espStorage.highlights[player] = nil
+    end
+
+    local b = espStorage.billboards[player]
+    if b then
+        b:Destroy()
+        espStorage.billboards[player] = nil
+    end
+end
+
+local function isEnemy(player)
+    if player == LocalPlayer then
+        return false
+    end
+
+    if not LocalPlayer.Team or not player.Team then
+        return true
+    end
+
+    return LocalPlayer.Team ~= player.Team
+end
+
+local function ensureEsp(player)
+    if not state.espEnabled then
+        clearEspForPlayer(player)
         return
     end
 
-    for _, instance in ipairs(prefabs:GetChildren()) do
-        if instance.Name == "Bananas3" and instance:IsA("MeshPart") then
-            instance.CFrame = rootPart.CFrame
+    local character = player.Character
+    local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head"))
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+    if not character or not root or not humanoid or humanoid.Health <= 0 or not isEnemy(player) then
+        clearEspForPlayer(player)
+        return
+    end
+
+    local highlight = espStorage.highlights[player]
+    if not highlight then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "HawkESP"
+        highlight.FillColor = Color3.fromRGB(255, 80, 80)
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.7
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = character
+        espStorage.highlights[player] = highlight
+    end
+    highlight.Adornee = character
+
+    local board = espStorage.billboards[player]
+    if state.espShowNames then
+        if not board then
+            board = Instance.new("BillboardGui")
+            board.Name = "HawkESPInfo"
+            board.Size = UDim2.fromOffset(180, 36)
+            board.StudsOffset = Vector3.new(0, 3.5, 0)
+            board.AlwaysOnTop = true
+
+            local label = Instance.new("TextLabel")
+            label.Name = "Label"
+            label.Size = UDim2.fromScale(1, 1)
+            label.BackgroundTransparency = 1
+            label.TextColor3 = Color3.fromRGB(255, 255, 255)
+            label.TextStrokeTransparency = 0.4
+            label.Font = Enum.Font.GothamBold
+            label.TextScaled = true
+            label.Parent = board
+
+            board.Parent = root
+            espStorage.billboards[player] = board
+        end
+
+        local label = board:FindFirstChild("Label")
+        if label then
+            label.Text = string.format("%s | %.0fHP", player.Name, humanoid.Health)
+        end
+
+        if board.Parent ~= root then
+            board.Parent = root
+        end
+    else
+        if board then
+            board:Destroy()
+            espStorage.billboards[player] = nil
         end
     end
 end
 
--- Keep collecting new/respawned Bananas3 automatically
-while task.wait(0.1) do
-    teleportBananas3ToPlayer()
+local function clearAllEsp()
+    for _, player in ipairs(Players:GetPlayers()) do
+        clearEspForPlayer(player)
+    end
 end
+
+local function setLog(text)
+    if ui.infoBox then
+        ui.infoBox.Text = text
+    end
+end
+
+local function formatVector3(v)
+    return string.format("Vector3.new(%.3f, %.3f, %.3f)", v.X, v.Y, v.Z)
+end
+
+local function objectReport(obj)
+    if not obj then
+        return "Ничего не выбрано"
+    end
+
+    local report = {
+        "=== Object Inspector ===",
+        "Name: " .. obj.Name,
+        "ClassName: " .. obj.ClassName,
+        "FullName: " .. obj:GetFullName(),
+    }
+
+    if obj:IsA("BasePart") then
+        table.insert(report, "Position: " .. formatVector3(obj.Position))
+        table.insert(report, "CFrame: " .. tostring(obj.CFrame))
+        table.insert(report, "Anchored: " .. tostring(obj.Anchored))
+        table.insert(report, "CanCollide: " .. tostring(obj.CanCollide))
+    end
+
+    return table.concat(report, "\n")
+end
+
+-- ---------- UI ----------
+local oldGui = PlayerGui:FindFirstChild("HawkUnifiedGui")
+if oldGui then
+    oldGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HawkUnifiedGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = PlayerGui
+
+local window = Instance.new("Frame")
+window.Size = UDim2.fromOffset(920, 580)
+window.Position = UDim2.new(0.5, -460, 0.5, -290)
+window.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
+window.BorderSizePixel = 0
+window.Parent = screenGui
+
+local windowCorner = Instance.new("UICorner")
+windowCorner.CornerRadius = UDim.new(0, 14)
+windowCorner.Parent = window
+
+local topbar = Instance.new("Frame")
+topbar.Size = UDim2.new(1, 0, 0, 48)
+topbar.BackgroundColor3 = Color3.fromRGB(31, 36, 46)
+topbar.BorderSizePixel = 0
+topbar.Parent = window
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 14)
+topCorner.Parent = topbar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -120, 1, 0)
+title.Position = UDim2.fromOffset(14, 0)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.fromRGB(240, 245, 255)
+title.Text = "HAWK | ESP Collab Hub"
+title.Parent = topbar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.fromOffset(84, 30)
+closeBtn.Position = UDim2.new(1, -94, 0.5, -15)
+closeBtn.BackgroundColor3 = Color3.fromRGB(190, 72, 72)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.Text = "Закрыть"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Parent = topbar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeBtn
+
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 220, 1, -48)
+sidebar.Position = UDim2.fromOffset(0, 48)
+sidebar.BackgroundColor3 = Color3.fromRGB(24, 27, 35)
+sidebar.BorderSizePixel = 0
+sidebar.Parent = window
+
+local tabsLayout = Instance.new("UIListLayout")
+tabsLayout.Padding = UDim.new(0, 12)
+tabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+tabsLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+tabsLayout.Parent = sidebar
+
+local tabsPadding = Instance.new("UIPadding")
+tabsPadding.PaddingTop = UDim.new(0, 16)
+tabsPadding.Parent = sidebar
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, -220, 1, -48)
+content.Position = UDim2.fromOffset(220, 48)
+content.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+content.BorderSizePixel = 0
+content.Parent = window
+
+local statusBar = Instance.new("TextLabel")
+statusBar.Size = UDim2.new(1, -12, 0, 26)
+statusBar.Position = UDim2.new(0, 6, 1, -30)
+statusBar.BackgroundColor3 = Color3.fromRGB(26, 30, 39)
+statusBar.BorderSizePixel = 0
+statusBar.Font = Enum.Font.Gotham
+statusBar.TextSize = 13
+statusBar.TextColor3 = Color3.fromRGB(210, 220, 235)
+statusBar.TextXAlignment = Enum.TextXAlignment.Left
+statusBar.Text = "  Готово. Выберите вкладку."
+statusBar.Parent = content
+
+local statusCorner = Instance.new("UICorner")
+statusCorner.CornerRadius = UDim.new(0, 8)
+statusCorner.Parent = statusBar
+
+local panelContainer = Instance.new("Frame")
+panelContainer.Size = UDim2.new(1, -12, 1, -46)
+panelContainer.Position = UDim2.fromOffset(6, 6)
+panelContainer.BackgroundTransparency = 1
+panelContainer.Parent = content
+
+local function makePanel(name)
+    local panel = Instance.new("Frame")
+    panel.Name = name
+    panel.Size = UDim2.fromScale(1, 1)
+    panel.BackgroundColor3 = Color3.fromRGB(21, 24, 31)
+    panel.BorderSizePixel = 0
+    panel.Visible = false
+    panel.Parent = panelContainer
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = panel
+
+    return panel
+end
+
+local function makeButton(parent, text, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.fromOffset(188, 44)
+    btn.BackgroundColor3 = color or Color3.fromRGB(58, 94, 156)
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 15
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Text = text
+    btn.Parent = parent
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 8)
+    c.Parent = btn
+
+    return btn
+end
+
+local panels = {
+    ESP = makePanel("ESP"),
+    INFO = makePanel("INFO"),
+    BANANA = makePanel("BANANA"),
+}
+
+local tabButtons = {}
+local activeTab = nil
+
+local function activateTab(name)
+    for tabName, panel in pairs(panels) do
+        panel.Visible = (tabName == name)
+        local btn = tabButtons[tabName]
+        if btn then
+            btn.BackgroundColor3 = (tabName == name) and Color3.fromRGB(92, 136, 220) or Color3.fromRGB(47, 56, 74)
+        end
+    end
+    activeTab = name
+    statusBar.Text = "  Активная вкладка: " .. name
+end
+
+for _, tabName in ipairs({"ESP", "INFO", "BANANA"}) do
+    local tabBtn = makeButton(sidebar, tabName, Color3.fromRGB(47, 56, 74))
+    tabButtons[tabName] = tabBtn
+    tabBtn.MouseButton1Click:Connect(function()
+        activateTab(tabName)
+    end)
+end
+
+-- ESP panel
+local espTitle = Instance.new("TextLabel")
+espTitle.Size = UDim2.new(1, -24, 0, 42)
+espTitle.Position = UDim2.fromOffset(12, 12)
+espTitle.BackgroundTransparency = 1
+espTitle.Font = Enum.Font.GothamBold
+espTitle.TextSize = 22
+espTitle.TextXAlignment = Enum.TextXAlignment.Left
+espTitle.TextColor3 = Color3.fromRGB(244, 247, 255)
+espTitle.Text = "ESP (Enemies)"
+espTitle.Parent = panels.ESP
+
+local espToggle = makeButton(panels.ESP, "Включить ESP", Color3.fromRGB(60, 138, 92))
+espToggle.Position = UDim2.fromOffset(12, 70)
+
+local nameToggle = makeButton(panels.ESP, "Имена: ВКЛ", Color3.fromRGB(95, 120, 190))
+nameToggle.Position = UDim2.fromOffset(214, 70)
+
+local espInfo = Instance.new("TextLabel")
+espInfo.Size = UDim2.new(1, -24, 0, 120)
+espInfo.Position = UDim2.fromOffset(12, 130)
+espInfo.BackgroundColor3 = Color3.fromRGB(27, 31, 40)
+espInfo.BorderSizePixel = 0
+espInfo.Font = Enum.Font.Code
+espInfo.TextSize = 15
+espInfo.TextXAlignment = Enum.TextXAlignment.Left
+espInfo.TextYAlignment = Enum.TextYAlignment.Top
+espInfo.TextColor3 = Color3.fromRGB(212, 222, 242)
+espInfo.TextWrapped = true
+espInfo.Text = "ESP подсвечивает врагов и выводит имя + HP над головой.\nОбновление автоматически в RenderStepped."
+espInfo.Parent = panels.ESP
+
+local espInfoCorner = Instance.new("UICorner")
+espInfoCorner.CornerRadius = UDim.new(0, 10)
+espInfoCorner.Parent = espInfo
+
+-- INFO panel
+local infoTitle = Instance.new("TextLabel")
+infoTitle.Size = UDim2.new(1, -24, 0, 42)
+infoTitle.Position = UDim2.fromOffset(12, 12)
+infoTitle.BackgroundTransparency = 1
+infoTitle.Font = Enum.Font.GothamBold
+infoTitle.TextSize = 22
+infoTitle.TextXAlignment = Enum.TextXAlignment.Left
+infoTitle.TextColor3 = Color3.fromRGB(244, 247, 255)
+infoTitle.Text = "Info по клику"
+infoTitle.Parent = panels.INFO
+
+local infoToggle = makeButton(panels.INFO, "Инспектор: ВЫКЛ", Color3.fromRGB(148, 102, 54))
+infoToggle.Position = UDim2.fromOffset(12, 70)
+
+local tpToTarget = makeButton(panels.INFO, "Телепорт к объекту", Color3.fromRGB(90, 92, 174))
+tpToTarget.Position = UDim2.fromOffset(214, 70)
+
+local infoBox = Instance.new("TextBox")
+infoBox.Size = UDim2.new(1, -24, 1, -130)
+infoBox.Position = UDim2.fromOffset(12, 120)
+infoBox.BackgroundColor3 = Color3.fromRGB(27, 31, 40)
+infoBox.BorderSizePixel = 0
+infoBox.ClearTextOnFocus = false
+infoBox.MultiLine = true
+infoBox.TextEditable = false
+infoBox.TextWrapped = false
+infoBox.TextXAlignment = Enum.TextXAlignment.Left
+infoBox.TextYAlignment = Enum.TextYAlignment.Top
+infoBox.Font = Enum.Font.Code
+infoBox.TextSize = 14
+infoBox.TextColor3 = Color3.fromRGB(230, 235, 245)
+infoBox.Text = "Включите инспектор и кликните ЛКМ по объекту в мире."
+infoBox.Parent = panels.INFO
+
+local infoCorner = Instance.new("UICorner")
+infoCorner.CornerRadius = UDim.new(0, 10)
+infoCorner.Parent = infoBox
+
+ui.infoBox = infoBox
+
+-- BANANA panel
+local bananaTitle = Instance.new("TextLabel")
+bananaTitle.Size = UDim2.new(1, -24, 0, 42)
+bananaTitle.Position = UDim2.fromOffset(12, 12)
+bananaTitle.BackgroundTransparency = 1
+bananaTitle.Font = Enum.Font.GothamBold
+bananaTitle.TextSize = 22
+bananaTitle.TextXAlignment = Enum.TextXAlignment.Left
+bananaTitle.TextColor3 = Color3.fromRGB(244, 247, 255)
+bananaTitle.Text = "Bananas3 Collector"
+bananaTitle.Parent = panels.BANANA
+
+local bananaToggle = makeButton(panels.BANANA, "Автосбор Bananas3: ВЫКЛ", Color3.fromRGB(176, 138, 56))
+bananaToggle.Position = UDim2.fromOffset(12, 70)
+
+local bananaPulse = makeButton(panels.BANANA, "Собрать 1 раз", Color3.fromRGB(100, 124, 64))
+bananaPulse.Position = UDim2.fromOffset(274, 70)
+
+local bananaInfo = Instance.new("TextLabel")
+bananaInfo.Size = UDim2.new(1, -24, 0, 130)
+bananaInfo.Position = UDim2.fromOffset(12, 130)
+bananaInfo.BackgroundColor3 = Color3.fromRGB(27, 31, 40)
+bananaInfo.BorderSizePixel = 0
+bananaInfo.Font = Enum.Font.Code
+bananaInfo.TextSize = 15
+bananaInfo.TextXAlignment = Enum.TextXAlignment.Left
+bananaInfo.TextYAlignment = Enum.TextYAlignment.Top
+bananaInfo.TextColor3 = Color3.fromRGB(227, 233, 244)
+bananaInfo.TextWrapped = true
+bananaInfo.Text = "Цель:\nName: Bananas3\nClassName: MeshPart\nFullName: Workspace.Prefabs.Bananas3\n\nПри автосборе все Bananas3 переносятся к вашему HumanoidRootPart."
+bananaInfo.Parent = panels.BANANA
+
+local bananaInfoCorner = Instance.new("UICorner")
+bananaInfoCorner.CornerRadius = UDim.new(0, 10)
+bananaInfoCorner.Parent = bananaInfo
+
+-- Drag window
+local dragging = false
+local dragStart, startPos
+
+topbar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = window.Position
+    end
+end)
+
+topbar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        window.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- ---------- logic hooks ----------
+espToggle.MouseButton1Click:Connect(function()
+    state.espEnabled = not state.espEnabled
+    espToggle.Text = state.espEnabled and "Выключить ESP" or "Включить ESP"
+    statusBar.Text = state.espEnabled and "  ESP включен" or "  ESP выключен"
+
+    if not state.espEnabled then
+        clearAllEsp()
+    end
+end)
+
+nameToggle.MouseButton1Click:Connect(function()
+    state.espShowNames = not state.espShowNames
+    nameToggle.Text = state.espShowNames and "Имена: ВКЛ" or "Имена: ВЫКЛ"
+end)
+
+infoToggle.MouseButton1Click:Connect(function()
+    state.inspectorEnabled = not state.inspectorEnabled
+    infoToggle.Text = state.inspectorEnabled and "Инспектор: ВКЛ" or "Инспектор: ВЫКЛ"
+    statusBar.Text = state.inspectorEnabled and "  Инспектор включен: кликните по объекту" or "  Инспектор выключен"
+end)
+
+tpToTarget.MouseButton1Click:Connect(function()
+    local target = state.selectedObject
+    if not target then
+        statusBar.Text = "  Нет выбранного объекта"
+        return
+    end
+
+    local destination
+    if target:IsA("BasePart") then
+        destination = target.CFrame
+    elseif target:IsA("Model") then
+        destination = target:GetPivot()
+    end
+
+    if destination then
+        local root = getRootPart()
+        root.CFrame = destination + Vector3.new(0, 4, 0)
+        statusBar.Text = "  Телепорт выполнен к: " .. target.Name
+    else
+        statusBar.Text = "  Нельзя телепортироваться к этому типу объекта"
+    end
+end)
+
+local function collectBananas3()
+    local prefabs = Workspace:FindFirstChild("Prefabs")
+    if not prefabs then
+        return 0
+    end
+
+    local rootPart = getRootPart()
+    local moved = 0
+
+    for _, obj in ipairs(prefabs:GetChildren()) do
+        if obj.Name == "Bananas3" and obj:IsA("MeshPart") then
+            obj.CFrame = rootPart.CFrame
+            moved += 1
+        end
+    end
+
+    return moved
+end
+
+bananaToggle.MouseButton1Click:Connect(function()
+    state.bananaEnabled = not state.bananaEnabled
+    bananaToggle.Text = state.bananaEnabled and "Автосбор Bananas3: ВКЛ" or "Автосбор Bananas3: ВЫКЛ"
+    statusBar.Text = state.bananaEnabled and "  Автосбор Bananas3 включен" or "  Автосбор Bananas3 выключен"
+end)
+
+bananaPulse.MouseButton1Click:Connect(function()
+    local moved = collectBananas3()
+    statusBar.Text = string.format("  Собрано за 1 раз: %d", moved)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    clearAllEsp()
+    screenGui:Destroy()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and state.inspectorEnabled then
+        local mousePos = UserInputService:GetMouseLocation()
+        local ray = Workspace.CurrentCamera:ViewportPointToRay(mousePos.X, mousePos.Y)
+
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.FilterDescendantsInstances = {getCharacter()}
+
+        local result = Workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+        if result and result.Instance then
+            state.selectedObject = result.Instance
+            setLog(objectReport(result.Instance))
+            statusBar.Text = "  Выбран объект: " .. result.Instance:GetFullName()
+        else
+            statusBar.Text = "  Объект не найден под курсором"
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    clearEspForPlayer(player)
+end)
+
+RunService.RenderStepped:Connect(function()
+    -- ESP
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            ensureEsp(player)
+        end
+    end
+
+    -- Bananas3 Auto Collect
+    if state.bananaEnabled then
+        collectBananas3()
+    end
+end)
+
+activateTab("ESP")
