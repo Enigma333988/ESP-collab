@@ -1,8 +1,9 @@
 -- HAWK: Ammo collector UI (toggle / minimize / close / drag)
--- Teleports shells/bullets/projectiles with different names to the local player.
+-- Collects projectile parts (Shell/Bullet/etc.) and teleports them to the local player.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 if not player then
@@ -17,30 +18,72 @@ end
 local collectorEnabled = false
 local minimized = false
 local conn
+local addedConn
+local removingConn
 
+local ammoParts = {}
+
+-- ВАЖНО: не используем "ammo" как keyword для имени,
+-- чтобы не цеплять объекты вроде ammodepositpads.Part
 local nameKeywords = {
-    "shell", "bullet", "ammo", "projectile", "round", "slug", "cartridge"
+    "shell", "bullet", "projectile", "round", "slug", "cartridge"
 }
+
+local function hasAmmoAncestor(instance)
+    local current = instance.Parent
+    while current do
+        if current == workspace then
+            break
+        end
+
+        if string.lower(current.Name) == "ammo" then
+            return true
+        end
+
+        current = current.Parent
+    end
+
+    return false
+end
 
 local function isAmmoPart(instance)
     if not instance:IsA("BasePart") then
         return false
     end
 
-    local fullName = string.lower(instance:GetFullName())
     local ownName = string.lower(instance.Name)
 
-    if string.find(fullName, "workspace.ammo", 1, true) then
+    if hasAmmoAncestor(instance) then
         return true
     end
 
     for _, keyword in ipairs(nameKeywords) do
-        if string.find(ownName, keyword, 1, true) or string.find(fullName, keyword, 1, true) then
+        if string.find(ownName, keyword, 1, true) then
             return true
         end
     end
 
     return false
+end
+
+local function trackIfAmmo(instance)
+    if isAmmoPart(instance) then
+        ammoParts[instance] = true
+    end
+end
+
+local function untrack(instance)
+    ammoParts[instance] = nil
+end
+
+local function rebuildAmmoCache()
+    table.clear(ammoParts)
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isAmmoPart(obj) then
+            ammoParts[obj] = true
+        end
+    end
 end
 
 local function collectAmmoToPlayer()
@@ -50,17 +93,19 @@ local function collectAmmoToPlayer()
     end
 
     local i = 0
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if isAmmoPart(obj) then
+    for obj in pairs(ammoParts) do
+        if obj and obj.Parent and obj:IsDescendantOf(workspace) then
             i += 1
 
-            local angle = i * 0.42
+            local angle = i * 0.45
             local radius = 2 + (i % 6) * 0.35
             local offset = Vector3.new(math.cos(angle) * radius, 1 + (i % 3) * 0.2, math.sin(angle) * radius)
 
             obj.CFrame = hrp.CFrame + offset
             obj.AssemblyLinearVelocity = Vector3.zero
             obj.AssemblyAngularVelocity = Vector3.zero
+        else
+            ammoParts[obj] = nil
         end
     end
 end
@@ -75,8 +120,8 @@ screenGui.Parent = guiParent
 
 local main = Instance.new("Frame")
 main.Name = "Main"
-main.Size = UDim2.fromOffset(300, 150)
-main.Position = UDim2.new(0.5, -150, 0.5, -90)
+main.Size = UDim2.fromOffset(320, 160)
+main.Position = UDim2.new(0.5, -160, 0.5, -95)
 main.BackgroundColor3 = Color3.fromRGB(28, 28, 32)
 main.BorderSizePixel = 0
 main.Parent = screenGui
@@ -156,22 +201,20 @@ tCorner.CornerRadius = UDim.new(0, 8)
 tCorner.Parent = toggleBtn
 
 local info = Instance.new("TextLabel")
-info.Size = UDim2.new(1, 0, 0, 45)
+info.Size = UDim2.new(1, 0, 0, 58)
 info.Position = UDim2.fromOffset(0, 56)
 info.BackgroundTransparency = 1
 info.TextColor3 = Color3.fromRGB(200, 200, 215)
 info.Font = Enum.Font.Gotham
 info.TextSize = 13
 info.TextWrapped = true
-info.Text = "Телепортирует все BasePart-пули/снаряды (Shell/Bullet/Ammo/Projectile и т.д.) к вашему персонажу."
+info.Text = "Собирает Shell/Bullet/Projectile и детали внутри папки Ammo. Не трогает ammodepositpads.Part."
 info.Parent = body
 
 local dragging = false
 local dragInput
 local dragStart
 local startPos
-
-local UserInputService = game:GetService("UserInputService")
 
 topBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -205,6 +248,12 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
+local function disconnectIfExists(connection)
+    if connection then
+        connection:Disconnect()
+    end
+end
+
 local function setCollectorState(state)
     collectorEnabled = state
 
@@ -212,21 +261,37 @@ local function setCollectorState(state)
         toggleBtn.Text = "Collector: ON"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 130, 55)
 
-        if conn then
-            conn:Disconnect()
-        end
+        rebuildAmmoCache()
 
-        conn = RunService.Heartbeat:Connect(function()
+        disconnectIfExists(addedConn)
+        disconnectIfExists(removingConn)
+        disconnectIfExists(conn)
+
+        addedConn = workspace.DescendantAdded:Connect(trackIfAmmo)
+        removingConn = workspace.DescendantRemoving:Connect(untrack)
+
+
+        local elapsed = 0
+        conn = RunService.Heartbeat:Connect(function(dt)
+            elapsed += dt
+            if elapsed >= 1.0 then
+                elapsed = 0
+                rebuildAmmoCache()
+            end
+
             collectAmmoToPlayer()
         end)
     else
         toggleBtn.Text = "Collector: OFF"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(140, 45, 45)
 
-        if conn then
-            conn:Disconnect()
-            conn = nil
-        end
+        disconnectIfExists(conn)
+        disconnectIfExists(addedConn)
+        disconnectIfExists(removingConn)
+
+        conn = nil
+        addedConn = nil
+        removingConn = nil
     end
 end
 
@@ -237,7 +302,7 @@ end)
 btnMin.MouseButton1Click:Connect(function()
     minimized = not minimized
     body.Visible = not minimized
-    main.Size = minimized and UDim2.fromOffset(300, 40) or UDim2.fromOffset(300, 150)
+    main.Size = minimized and UDim2.fromOffset(320, 40) or UDim2.fromOffset(320, 160)
 end)
 
 btnClose.MouseButton1Click:Connect(function()
