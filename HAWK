@@ -194,7 +194,7 @@ statusBar.TextSize = 13
 statusBar.TextColor3 = Color3.fromRGB(210, 220, 235)
 statusBar.TextXAlignment = Enum.TextXAlignment.Left
 statusBar.Text = "  Готово."
-statusBar.Parent = content
+statusBar.Parent = window
 ui.statusBar = statusBar
 
 local statusCorner = Instance.new("UICorner")
