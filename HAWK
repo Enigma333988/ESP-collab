@@ -1,54 +1,23 @@
--- HAWK Unified ESP Collab Hub
--- Объединяет: полный ESP+Assist, Object Info по клику, сбор Bananas3
+-- HAWK Bananas-only mini UI
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local CollectionService = game:GetService("CollectionService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+local WINDOW_WIDTH = 360
+local WINDOW_EXPANDED_HEIGHT = 200
+local WINDOW_COLLAPSED_HEIGHT = 40
+
 local state = {
-    inspectorEnabled = false,
     bananaEnabled = false,
-    selectedObject = nil,
-    draggingWindow = false,
-    aimHoldingRMB = false,
-    draggingRadius = false,
+    collapsed = false,
 }
-
-local SETTINGS = {
-    ESPEnabled = true,
-    TeamCheck = true,
-    UseTeamColor = false,
-    EnemyColor = Color3.fromRGB(255, 70, 70),
-    FillTransparency = 0.75,
-    OutlineTransparency = 0,
-    DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
-
-    ShowInfo = true,
-    InfoTextColor = Color3.fromRGB(255, 255, 255),
-    InfoTextSize = 13,
-    MaxInfoDistance = 5000,
-
-    AssistEnabled = true,
-    AimBotEnabled = false,
-    AimBotFollowDistance = 2,
-    MinRadius = 30,
-    MaxRadius = 350,
-    CaptureRadius = 130,
-
-    RefreshInterval = 0.12,
-}
-
-local highlights = {}
-local infoBillboards = {}
 
 local ui = {}
-local aimBotLockedPlayer = nil
-local refreshAccumulator = 0
 
 local function getCharacter(player)
     player = player or LocalPlayer
@@ -67,389 +36,6 @@ end
 local function getRootPart(character)
     character = character or getCharacter(LocalPlayer)
     return character and character:FindFirstChild("HumanoidRootPart")
-end
-
-local function getHead(character)
-    return character and character:FindFirstChild("Head")
-end
-
-local function isAlive(character)
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
-end
-
-local function isEnemy(player)
-    if player == LocalPlayer then
-        return false
-    end
-    if not SETTINGS.TeamCheck then
-        return true
-    end
-    if not LocalPlayer.Team or not player.Team then
-        return true
-    end
-    return LocalPlayer.Team ~= player.Team
-end
-
-local function getDistanceToCharacter(character)
-    local localRoot = getRootPart(getCharacter(LocalPlayer))
-    local targetRoot = getRootPart(character)
-    if not localRoot or not targetRoot then
-        return nil
-    end
-    return (targetRoot.Position - localRoot.Position).Magnitude
-end
-
-local function cleanupHighlight(player)
-    local h = highlights[player]
-    if h then
-        h:Destroy()
-        highlights[player] = nil
-    end
-end
-
-local function cleanupInfo(player)
-    local b = infoBillboards[player]
-    if b then
-        b:Destroy()
-        infoBillboards[player] = nil
-    end
-end
-
-local function cleanupVisuals(player)
-    cleanupHighlight(player)
-    cleanupInfo(player)
-end
-
-local function ensureInfoBillboard(player, character)
-    if not SETTINGS.ShowInfo then
-        cleanupInfo(player)
-        return
-    end
-
-    local head = getHead(character)
-    if not head then
-        cleanupInfo(player)
-        return
-    end
-
-    local billboard = infoBillboards[player]
-    if not billboard then
-        billboard = Instance.new("BillboardGui")
-        billboard.Name = "EnemyInfo"
-        billboard.Size = UDim2.fromOffset(160, 34)
-        billboard.StudsOffset = Vector3.new(0, -3.2, 0)
-        billboard.AlwaysOnTop = true
-
-        local text = Instance.new("TextLabel")
-        text.Name = "InfoLabel"
-        text.BackgroundTransparency = 1
-        text.Size = UDim2.fromScale(1, 1)
-        text.Font = Enum.Font.GothamBold
-        text.TextScaled = false
-        text.TextWrapped = true
-        text.Parent = billboard
-
-        local stroke = Instance.new("UIStroke")
-        stroke.Thickness = 1.4
-        stroke.Color = Color3.fromRGB(0, 0, 0)
-        stroke.Transparency = 0.2
-        stroke.Parent = text
-
-        infoBillboards[player] = billboard
-    end
-
-    billboard.Parent = character
-    billboard.Adornee = head
-
-    local label = billboard:FindFirstChild("InfoLabel")
-    if label then
-        local dist = getDistanceToCharacter(character)
-        if dist and dist <= SETTINGS.MaxInfoDistance then
-            label.Visible = true
-            label.TextColor3 = SETTINGS.InfoTextColor
-            label.TextSize = SETTINGS.InfoTextSize
-            label.Text = string.format("%s\n%dm", player.Name, math.floor(dist + 0.5))
-        else
-            label.Visible = false
-        end
-    end
-end
-
-local function applyVisuals(player)
-    if not SETTINGS.ESPEnabled or not isEnemy(player) then
-        cleanupVisuals(player)
-        return
-    end
-
-    local character = getCharacter(player)
-    if not character or not isAlive(character) then
-        cleanupVisuals(player)
-        return
-    end
-
-    local highlight = highlights[player]
-    if not highlight then
-        highlight = Instance.new("Highlight")
-        highlight.Name = "EnemyESP"
-        highlights[player] = highlight
-    end
-
-    highlight.Parent = character
-    highlight.Adornee = character
-    highlight.DepthMode = SETTINGS.DepthMode
-    highlight.FillTransparency = SETTINGS.FillTransparency
-    highlight.OutlineTransparency = SETTINGS.OutlineTransparency
-
-    local color = SETTINGS.EnemyColor
-    if SETTINGS.UseTeamColor and player.TeamColor then
-        color = player.TeamColor.Color
-    end
-
-    highlight.FillColor = color
-    highlight.OutlineColor = color
-
-    ensureInfoBillboard(player, character)
-end
-
-local function refreshAllVisuals()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            applyVisuals(player)
-        end
-    end
-end
-
-local function getClosestEnemyHeadInCircle()
-    local camera = Workspace.CurrentCamera
-    local myCharacter = getCharacter(LocalPlayer)
-    if not camera or not myCharacter or not isAlive(myCharacter) then
-        return nil
-    end
-
-    local crosshair = camera.ViewportSize * 0.5
-    local nearestHead, nearestDist = nil, math.huge
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if isEnemy(player) then
-            local character = getCharacter(player)
-            local head = getHead(character)
-            if head and isAlive(character) then
-                local p, onScreen = camera:WorldToViewportPoint(head.Position)
-                if onScreen and p.Z > 0 then
-                    local d = (Vector2.new(p.X, p.Y) - crosshair).Magnitude
-                    if d <= SETTINGS.CaptureRadius and d < nearestDist then
-                        nearestDist, nearestHead = d, head
-                    end
-                end
-            end
-        end
-    end
-
-    return nearestHead
-end
-
-local function getClosestEnemyToCrosshair()
-    local camera = Workspace.CurrentCamera
-    local myCharacter = getCharacter(LocalPlayer)
-    if not camera or not myCharacter or not isAlive(myCharacter) then
-        return nil
-    end
-
-    local crosshair = camera.ViewportSize * 0.5
-    local nearestPlayer, nearestDist = nil, math.huge
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if isEnemy(player) then
-            local character = getCharacter(player)
-            local head = getHead(character)
-            if head and isAlive(character) then
-                local p, onScreen = camera:WorldToViewportPoint(head.Position)
-                if onScreen and p.Z > 0 then
-                    local d = (Vector2.new(p.X, p.Y) - crosshair).Magnitude
-                    if d < nearestDist then
-                        nearestDist, nearestPlayer = d, player
-                    end
-                end
-            end
-        end
-    end
-
-    return nearestPlayer
-end
-
-local function clearAimBotLock()
-    aimBotLockedPlayer = nil
-end
-
-local function followTargetBehind(targetPlayer)
-    if not targetPlayer then
-        return nil
-    end
-
-    local targetCharacter = getCharacter(targetPlayer)
-    local myCharacter = getCharacter(LocalPlayer)
-    local targetHead = getHead(targetCharacter)
-    local targetRoot = getRootPart(targetCharacter)
-    local myRoot = getRootPart(myCharacter)
-
-    if not targetCharacter or not myCharacter or not targetHead or not targetRoot or not myRoot or not isAlive(targetCharacter) then
-        return nil
-    end
-
-    local behind = targetRoot.Position - targetRoot.CFrame.LookVector * SETTINGS.AimBotFollowDistance
-    myRoot.CFrame = CFrame.new(behind, targetHead.Position)
-    return targetHead
-end
-
-local function updateAssist()
-    if not SETTINGS.AssistEnabled then
-        clearAimBotLock()
-        return
-    end
-
-    local camera = Workspace.CurrentCamera
-    if not camera then
-        return
-    end
-
-    if SETTINGS.AimBotEnabled then
-        if not state.aimHoldingRMB then
-            clearAimBotLock()
-            return
-        end
-
-        if not aimBotLockedPlayer then
-            aimBotLockedPlayer = getClosestEnemyToCrosshair()
-        end
-
-        local targetHead = followTargetBehind(aimBotLockedPlayer)
-        if not targetHead then
-            clearAimBotLock()
-            return
-        end
-
-        camera.CFrame = CFrame.new(camera.CFrame.Position, targetHead.Position)
-        return
-    end
-
-    clearAimBotLock()
-
-    if not state.aimHoldingRMB then
-        return
-    end
-
-    local targetHead = getClosestEnemyHeadInCircle()
-    if targetHead then
-        camera.CFrame = CFrame.new(camera.CFrame.Position, targetHead.Position)
-    end
-end
-
-local function setStatus(text)
-    if ui.statusBar then
-        ui.statusBar.Text = "  " .. text
-    end
-end
-
-local function setLog(text)
-    if ui.infoBox then
-        ui.infoBox.Text = text
-    end
-end
-
-local function toStr(v)
-    local t = typeof(v)
-    if t == "number" then
-        return string.format("%.6f", v)
-    elseif t == "boolean" then
-        return v and "true" or "false"
-    elseif t == "Vector3" then
-        return string.format("Vector3(%.3f, %.3f, %.3f)", v.X, v.Y, v.Z)
-    elseif t == "Color3" then
-        return string.format("Color3(%.3f, %.3f, %.3f)", v.R, v.G, v.B)
-    elseif t == "CFrame" then
-        local p = v.Position
-        return string.format("CFrame(pos=%.3f, %.3f, %.3f)", p.X, p.Y, p.Z)
-    elseif t == "Vector2" then
-        return string.format("Vector2(%.3f, %.3f)", v.X, v.Y)
-    elseif t == "UDim2" then
-        return string.format("UDim2(%.3f, %d, %.3f, %d)", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
-    elseif t == "Instance" then
-        return v:GetFullName()
-    end
-    return tostring(v)
-end
-
-local function buildInfo(inst)
-    if not inst then
-        return "Ничего не выбрано"
-    end
-
-    local lines = {}
-    table.insert(lines, ("Name: %s"):format(inst.Name))
-    table.insert(lines, ("ClassName: %s"):format(inst.ClassName))
-    table.insert(lines, ("FullName: %s"):format(inst:GetFullName()))
-    table.insert(lines, ("Parent: %s"):format(inst.Parent and inst.Parent:GetFullName() or "nil"))
-    table.insert(lines, "")
-
-    if inst:IsA("BasePart") then
-        table.insert(lines, "[BasePart]")
-        table.insert(lines, ("Position: %s"):format(toStr(inst.Position)))
-        table.insert(lines, ("Orientation: %s"):format(toStr(inst.Orientation)))
-        table.insert(lines, ("CFrame: %s"):format(toStr(inst.CFrame)))
-        table.insert(lines, ("Size: %s"):format(toStr(inst.Size)))
-        table.insert(lines, ("Anchored: %s"):format(tostring(inst.Anchored)))
-        table.insert(lines, ("CanCollide: %s"):format(tostring(inst.CanCollide)))
-        table.insert(lines, "")
-    end
-
-    local attrs = inst:GetAttributes()
-    table.insert(lines, "[Attributes]")
-    local keys = {}
-    for k in pairs(attrs) do
-        table.insert(keys, k)
-    end
-    table.sort(keys)
-
-    if #keys == 0 then
-        table.insert(lines, "- (none)")
-    else
-        for _, k in ipairs(keys) do
-            table.insert(lines, ("- %s = %s (%s)"):format(k, toStr(attrs[k]), typeof(attrs[k])))
-        end
-    end
-
-    table.insert(lines, "")
-    table.insert(lines, "[Tags]")
-    local tags = CollectionService:GetTags(inst)
-    table.sort(tags)
-    if #tags == 0 then
-        table.insert(lines, "- (none)")
-    else
-        for _, tag in ipairs(tags) do
-            table.insert(lines, "- " .. tag)
-        end
-    end
-
-    table.insert(lines, "")
-    local children = inst:GetChildren()
-    table.sort(children, function(a, b)
-        if a.Name == b.Name then
-            return a.ClassName < b.ClassName
-        end
-        return a.Name < b.Name
-    end)
-
-    table.insert(lines, ("[Children] count=%d"):format(#children))
-    for i = 1, math.min(#children, 30) do
-        local c = children[i]
-        table.insert(lines, ("- %s (%s)"):format(c.Name, c.ClassName))
-    end
-
-    table.insert(lines, "")
-    table.insert(lines, ("[Descendants] count=%d"):format(#inst:GetDescendants()))
-
-    return table.concat(lines, "\n")
 end
 
 local function collectBananas3()
@@ -474,6 +60,19 @@ local function collectBananas3()
     return moved
 end
 
+local function setStatus(text)
+    if ui.statusBar then
+        ui.statusBar.Text = "  " .. text
+    end
+end
+
+local function applyCollapsedState()
+    local targetHeight = state.collapsed and WINDOW_COLLAPSED_HEIGHT or WINDOW_EXPANDED_HEIGHT
+    ui.window.Size = UDim2.fromOffset(WINDOW_WIDTH, targetHeight)
+    ui.content.Visible = not state.collapsed
+    ui.collapseBtn.Text = state.collapsed and "+" or "−"
+end
+
 -- ---------- UI ----------
 local oldGui = PlayerGui:FindFirstChild("HawkUnifiedGui")
 if oldGui then
@@ -487,64 +86,59 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = PlayerGui
 ui.screenGui = screenGui
 
-local captureCircle = Instance.new("Frame")
-captureCircle.Name = "CaptureCircle"
-captureCircle.AnchorPoint = Vector2.new(0.5, 0.5)
-captureCircle.BackgroundTransparency = 0.65
-captureCircle.BackgroundColor3 = Color3.fromRGB(80, 170, 255)
-captureCircle.BorderSizePixel = 0
-captureCircle.Parent = screenGui
-ui.captureCircle = captureCircle
-
-local captureCircleCorner = Instance.new("UICorner")
-captureCircleCorner.CornerRadius = UDim.new(1, 0)
-captureCircleCorner.Parent = captureCircle
-
-local captureCircleStroke = Instance.new("UIStroke")
-captureCircleStroke.Color = Color3.fromRGB(170, 220, 255)
-captureCircleStroke.Thickness = 2
-captureCircleStroke.Transparency = 0.15
-captureCircleStroke.Parent = captureCircle
-
 local window = Instance.new("Frame")
-window.Size = UDim2.fromOffset(980, 620)
-window.Position = UDim2.new(0.5, -490, 0.5, -310)
+window.Size = UDim2.fromOffset(WINDOW_WIDTH, WINDOW_EXPANDED_HEIGHT)
+window.Position = UDim2.new(0.5, -WINDOW_WIDTH / 2, 0.5, -100)
 window.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 window.BorderSizePixel = 0
 window.Parent = screenGui
+ui.window = window
 
 local windowCorner = Instance.new("UICorner")
-windowCorner.CornerRadius = UDim.new(0, 14)
+windowCorner.CornerRadius = UDim.new(0, 12)
 windowCorner.Parent = window
 
 local topbar = Instance.new("Frame")
-topbar.Size = UDim2.new(1, 0, 0, 48)
+topbar.Size = UDim2.new(1, 0, 0, WINDOW_COLLAPSED_HEIGHT)
 topbar.BackgroundColor3 = Color3.fromRGB(31, 36, 46)
 topbar.BorderSizePixel = 0
+topbar.Active = true
 topbar.Parent = window
 
-local topCorner = Instance.new("UICorner")
-topCorner.CornerRadius = UDim.new(0, 14)
-topCorner.Parent = topbar
-
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -120, 1, 0)
-title.Position = UDim2.fromOffset(14, 0)
+title.Size = UDim2.new(1, -140, 1, 0)
+title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.TextSize = 18
+title.TextSize = 16
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(240, 245, 255)
-title.Text = "HAWK | ESP + INFO + BANANAS"
+title.Text = "HAWK | Bananas"
 title.Parent = topbar
 
+local collapseBtn = Instance.new("TextButton")
+collapseBtn.Size = UDim2.fromOffset(28, 26)
+collapseBtn.Position = UDim2.new(1, -114, 0.5, -13)
+collapseBtn.BackgroundColor3 = Color3.fromRGB(70, 88, 120)
+collapseBtn.BorderSizePixel = 0
+collapseBtn.Font = Enum.Font.GothamBold
+collapseBtn.TextSize = 16
+collapseBtn.Text = "−"
+collapseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+collapseBtn.Parent = topbar
+ui.collapseBtn = collapseBtn
+
+local collapseCorner = Instance.new("UICorner")
+collapseCorner.CornerRadius = UDim.new(0, 8)
+collapseCorner.Parent = collapseBtn
+
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(84, 30)
-closeBtn.Position = UDim2.new(1, -94, 0.5, -15)
+closeBtn.Size = UDim2.fromOffset(72, 26)
+closeBtn.Position = UDim2.new(1, -80, 0.5, -13)
 closeBtn.BackgroundColor3 = Color3.fromRGB(190, 72, 72)
 closeBtn.BorderSizePixel = 0
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
+closeBtn.TextSize = 13
 closeBtn.Text = "Закрыть"
 closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.Parent = topbar
@@ -553,33 +147,46 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 8)
 closeCorner.Parent = closeBtn
 
-local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 220, 1, -48)
-sidebar.Position = UDim2.fromOffset(0, 48)
-sidebar.BackgroundColor3 = Color3.fromRGB(24, 27, 35)
-sidebar.BorderSizePixel = 0
-sidebar.Parent = window
-
-local tabsLayout = Instance.new("UIListLayout")
-tabsLayout.Padding = UDim.new(0, 12)
-tabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-tabsLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-tabsLayout.Parent = sidebar
-
-local tabsPadding = Instance.new("UIPadding")
-tabsPadding.PaddingTop = UDim.new(0, 16)
-tabsPadding.Parent = sidebar
-
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1, -220, 1, -48)
-content.Position = UDim2.fromOffset(220, 48)
-content.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
-content.BorderSizePixel = 0
+content.Size = UDim2.new(1, 0, 1, -WINDOW_COLLAPSED_HEIGHT)
+content.Position = UDim2.fromOffset(0, WINDOW_COLLAPSED_HEIGHT)
+content.BackgroundTransparency = 1
 content.Parent = window
+ui.content = content
+
+local bananaToggle = Instance.new("TextButton")
+bananaToggle.Size = UDim2.fromOffset(220, 40)
+bananaToggle.Position = UDim2.fromOffset(12, 16)
+bananaToggle.BackgroundColor3 = Color3.fromRGB(176, 138, 56)
+bananaToggle.BorderSizePixel = 0
+bananaToggle.Font = Enum.Font.GothamSemibold
+bananaToggle.TextSize = 14
+bananaToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+bananaToggle.Text = "Автосбор Bananas3: ВЫКЛ"
+bananaToggle.Parent = content
+
+local bananaToggleCorner = Instance.new("UICorner")
+bananaToggleCorner.CornerRadius = UDim.new(0, 8)
+bananaToggleCorner.Parent = bananaToggle
+
+local bananaPulse = Instance.new("TextButton")
+bananaPulse.Size = UDim2.fromOffset(112, 40)
+bananaPulse.Position = UDim2.fromOffset(236, 16)
+bananaPulse.BackgroundColor3 = Color3.fromRGB(100, 124, 64)
+bananaPulse.BorderSizePixel = 0
+bananaPulse.Font = Enum.Font.GothamSemibold
+bananaPulse.TextSize = 14
+bananaPulse.TextColor3 = Color3.fromRGB(255, 255, 255)
+bananaPulse.Text = "Собрать"
+bananaPulse.Parent = content
+
+local bananaPulseCorner = Instance.new("UICorner")
+bananaPulseCorner.CornerRadius = UDim.new(0, 8)
+bananaPulseCorner.Parent = bananaPulse
 
 local statusBar = Instance.new("TextLabel")
-statusBar.Size = UDim2.new(1, -12, 0, 26)
-statusBar.Position = UDim2.new(0, 6, 1, -30)
+statusBar.Size = UDim2.new(1, -24, 0, 30)
+statusBar.Position = UDim2.new(0, 12, 1, -42)
 statusBar.BackgroundColor3 = Color3.fromRGB(26, 30, 39)
 statusBar.BorderSizePixel = 0
 statusBar.Font = Enum.Font.Gotham
@@ -594,494 +201,76 @@ local statusCorner = Instance.new("UICorner")
 statusCorner.CornerRadius = UDim.new(0, 8)
 statusCorner.Parent = statusBar
 
-local panelContainer = Instance.new("Frame")
-panelContainer.Size = UDim2.new(1, -12, 1, -46)
-panelContainer.Position = UDim2.fromOffset(6, 6)
-panelContainer.BackgroundTransparency = 1
-panelContainer.Parent = content
+-- drag window (works in expanded and collapsed state)
+local dragging = false
+local dragStart
+local startPos
+local dragInput
 
-local function makePanel(name)
-    local panel = Instance.new("Frame")
-    panel.Name = name
-    panel.Size = UDim2.fromScale(1, 1)
-    panel.BackgroundColor3 = Color3.fromRGB(21, 24, 31)
-    panel.BorderSizePixel = 0
-    panel.Visible = false
-    panel.Parent = panelContainer
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = panel
-
-    return panel
-end
-
-local function makeButton(parent, text, color, width, height)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(width or 188, height or 44)
-    btn.BackgroundColor3 = color or Color3.fromRGB(58, 94, 156)
-    btn.BorderSizePixel = 0
-    btn.Font = Enum.Font.GothamSemibold
-    btn.TextSize = 15
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Text = text
-    btn.Parent = parent
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 8)
-    c.Parent = btn
-
-    return btn
-end
-
-local panels = {
-    ESP = makePanel("ESP"),
-    INFO = makePanel("INFO"),
-    BANANA = makePanel("BANANA"),
-}
-
-local tabButtons = {}
-local function activateTab(name)
-    for tabName, panel in pairs(panels) do
-        panel.Visible = (tabName == name)
-        local btn = tabButtons[tabName]
-        if btn then
-            btn.BackgroundColor3 = (tabName == name) and Color3.fromRGB(92, 136, 220) or Color3.fromRGB(47, 56, 74)
-        end
-    end
-    setStatus("Активная вкладка: " .. name)
-end
-
-for _, tabName in ipairs({"ESP", "INFO", "BANANA"}) do
-    local tabBtn = makeButton(sidebar, tabName, Color3.fromRGB(47, 56, 74))
-    tabButtons[tabName] = tabBtn
-    tabBtn.MouseButton1Click:Connect(function() activateTab(tabName) end)
-end
-
--- ESP panel
-local espTitle = Instance.new("TextLabel")
-espTitle.Size = UDim2.new(1, -24, 0, 42)
-espTitle.Position = UDim2.fromOffset(12, 12)
-espTitle.BackgroundTransparency = 1
-espTitle.Font = Enum.Font.GothamBold
-espTitle.TextSize = 22
-espTitle.TextXAlignment = Enum.TextXAlignment.Left
-espTitle.TextColor3 = Color3.fromRGB(244, 247, 255)
-espTitle.Text = "ESP + Assist"
-espTitle.Parent = panels.ESP
-
-local espToggle = makeButton(panels.ESP, "ESP: ВКЛ", Color3.fromRGB(60, 138, 92), 180, 38)
-espToggle.Position = UDim2.fromOffset(12, 70)
-
-local teamToggle = makeButton(panels.ESP, "TeamCheck: ВКЛ", Color3.fromRGB(95, 120, 190), 180, 38)
-teamToggle.Position = UDim2.fromOffset(204, 70)
-
-local infoToggle = makeButton(panels.ESP, "Info: ВКЛ", Color3.fromRGB(95, 120, 190), 160, 38)
-infoToggle.Position = UDim2.fromOffset(396, 70)
-
-local assistToggle = makeButton(panels.ESP, "Assist: ВКЛ", Color3.fromRGB(60, 138, 92), 180, 38)
-assistToggle.Position = UDim2.fromOffset(12, 118)
-
-local aimBotToggle = makeButton(panels.ESP, "AimBot: ВЫКЛ", Color3.fromRGB(145, 78, 78), 180, 38)
-aimBotToggle.Position = UDim2.fromOffset(204, 118)
-
-local radiusLabel = Instance.new("TextLabel")
-radiusLabel.Size = UDim2.fromOffset(300, 24)
-radiusLabel.Position = UDim2.fromOffset(12, 168)
-radiusLabel.BackgroundTransparency = 1
-radiusLabel.Font = Enum.Font.Gotham
-radiusLabel.TextSize = 15
-radiusLabel.TextXAlignment = Enum.TextXAlignment.Left
-radiusLabel.TextColor3 = Color3.fromRGB(220, 230, 240)
-radiusLabel.Text = "Радиус захвата: 130"
-radiusLabel.Parent = panels.ESP
-ui.radiusLabel = radiusLabel
-
-local sliderBar = Instance.new("Frame")
-sliderBar.Size = UDim2.fromOffset(420, 10)
-sliderBar.Position = UDim2.fromOffset(12, 196)
-sliderBar.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
-sliderBar.BorderSizePixel = 0
-sliderBar.Parent = panels.ESP
-ui.sliderBar = sliderBar
-
-local sliderBarCorner = Instance.new("UICorner")
-sliderBarCorner.CornerRadius = UDim.new(1, 0)
-sliderBarCorner.Parent = sliderBar
-
-local sliderFill = Instance.new("Frame")
-sliderFill.Size = UDim2.new(0, 0, 1, 0)
-sliderFill.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
-sliderFill.BorderSizePixel = 0
-sliderFill.Parent = sliderBar
-ui.sliderFill = sliderFill
-
-local sliderFillCorner = Instance.new("UICorner")
-sliderFillCorner.CornerRadius = UDim.new(1, 0)
-sliderFillCorner.Parent = sliderFill
-
-local sliderKnob = Instance.new("Frame")
-sliderKnob.Size = UDim2.fromOffset(14, 14)
-sliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
-sliderKnob.Position = UDim2.new(0, 0, 0.5, 0)
-sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-sliderKnob.BorderSizePixel = 0
-sliderKnob.Parent = sliderBar
-ui.sliderKnob = sliderKnob
-
-local sliderKnobCorner = Instance.new("UICorner")
-sliderKnobCorner.CornerRadius = UDim.new(1, 0)
-sliderKnobCorner.Parent = sliderKnob
-
-local espInfo = Instance.new("TextLabel")
-espInfo.Size = UDim2.new(1, -24, 0, 130)
-espInfo.Position = UDim2.fromOffset(12, 226)
-espInfo.BackgroundColor3 = Color3.fromRGB(27, 31, 40)
-espInfo.BorderSizePixel = 0
-espInfo.Font = Enum.Font.Code
-espInfo.TextSize = 15
-espInfo.TextXAlignment = Enum.TextXAlignment.Left
-espInfo.TextYAlignment = Enum.TextYAlignment.Top
-espInfo.TextColor3 = Color3.fromRGB(212, 222, 242)
-espInfo.TextWrapped = true
-espInfo.Text = "Полный ESP из Ultimate: подсветка, дистанция, TeamCheck, Assist на ПКМ, AimBot-следование."
-espInfo.Parent = panels.ESP
-
-local espInfoCorner = Instance.new("UICorner")
-espInfoCorner.CornerRadius = UDim.new(0, 10)
-espInfoCorner.Parent = espInfo
-
--- INFO panel
-local infoTitle = Instance.new("TextLabel")
-infoTitle.Size = UDim2.new(1, -24, 0, 42)
-infoTitle.Position = UDim2.fromOffset(12, 12)
-infoTitle.BackgroundTransparency = 1
-infoTitle.Font = Enum.Font.GothamBold
-infoTitle.TextSize = 22
-infoTitle.TextXAlignment = Enum.TextXAlignment.Left
-infoTitle.TextColor3 = Color3.fromRGB(244, 247, 255)
-infoTitle.Text = "Info по клику"
-infoTitle.Parent = panels.INFO
-
-local inspectToggle = makeButton(panels.INFO, "Инспектор: ВЫКЛ", Color3.fromRGB(148, 102, 54), 180, 38)
-inspectToggle.Position = UDim2.fromOffset(12, 70)
-
-local tpToTarget = makeButton(panels.INFO, "Телепорт к объекту", Color3.fromRGB(90, 92, 174), 200, 38)
-tpToTarget.Position = UDim2.fromOffset(204, 70)
-
-local copyCamXYZ = makeButton(panels.INFO, "Скопировать Camera CFrame", Color3.fromRGB(77, 110, 170), 250, 38)
-copyCamXYZ.Position = UDim2.fromOffset(416, 70)
-
-local infoBox = Instance.new("TextBox")
-infoBox.Size = UDim2.new(1, -24, 1, -130)
-infoBox.Position = UDim2.fromOffset(12, 120)
-infoBox.BackgroundColor3 = Color3.fromRGB(27, 31, 40)
-infoBox.BorderSizePixel = 0
-infoBox.ClearTextOnFocus = false
-infoBox.MultiLine = true
-infoBox.TextEditable = false
-infoBox.TextWrapped = false
-infoBox.TextXAlignment = Enum.TextXAlignment.Left
-infoBox.TextYAlignment = Enum.TextYAlignment.Top
-infoBox.Font = Enum.Font.Code
-infoBox.TextSize = 14
-infoBox.TextColor3 = Color3.fromRGB(230, 235, 245)
-infoBox.Text = "Включите инспектор и кликните ЛКМ по объекту в мире."
-infoBox.Parent = panels.INFO
-ui.infoBox = infoBox
-
-local infoCorner = Instance.new("UICorner")
-infoCorner.CornerRadius = UDim.new(0, 10)
-infoCorner.Parent = infoBox
-
--- BANANA panel
-local bananaTitle = Instance.new("TextLabel")
-bananaTitle.Size = UDim2.new(1, -24, 0, 42)
-bananaTitle.Position = UDim2.fromOffset(12, 12)
-bananaTitle.BackgroundTransparency = 1
-bananaTitle.Font = Enum.Font.GothamBold
-bananaTitle.TextSize = 22
-bananaTitle.TextXAlignment = Enum.TextXAlignment.Left
-bananaTitle.TextColor3 = Color3.fromRGB(244, 247, 255)
-bananaTitle.Text = "Bananas3 Collector"
-bananaTitle.Parent = panels.BANANA
-
-local bananaToggle = makeButton(panels.BANANA, "Автосбор Bananas3: ВЫКЛ", Color3.fromRGB(176, 138, 56), 250, 38)
-bananaToggle.Position = UDim2.fromOffset(12, 70)
-
-local bananaPulse = makeButton(panels.BANANA, "Собрать 1 раз", Color3.fromRGB(100, 124, 64), 180, 38)
-bananaPulse.Position = UDim2.fromOffset(274, 70)
-
-local bananaInfo = Instance.new("TextLabel")
-bananaInfo.Size = UDim2.new(1, -24, 0, 130)
-bananaInfo.Position = UDim2.fromOffset(12, 130)
-bananaInfo.BackgroundColor3 = Color3.fromRGB(27, 31, 40)
-bananaInfo.BorderSizePixel = 0
-bananaInfo.Font = Enum.Font.Code
-bananaInfo.TextSize = 15
-bananaInfo.TextXAlignment = Enum.TextXAlignment.Left
-bananaInfo.TextYAlignment = Enum.TextYAlignment.Top
-bananaInfo.TextColor3 = Color3.fromRGB(227, 233, 244)
-bananaInfo.TextWrapped = true
-bananaInfo.Text = "Цель: Workspace.Prefabs.Bananas3 (MeshPart).\nАвтосбор переносит все Bananas3 к вашему HumanoidRootPart."
-bananaInfo.Parent = panels.BANANA
-
-local bananaInfoCorner = Instance.new("UICorner")
-bananaInfoCorner.CornerRadius = UDim.new(0, 10)
-bananaInfoCorner.Parent = bananaInfo
-
--- drag window
-local dragStart, startPos
 topbar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingWindow = true
+        dragging = true
         dragStart = input.Position
         startPos = window.Position
-    end
-end)
+        dragInput = input
 
-topbar.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingWindow = false
-    end
-end)
-
-local function updateRadiusUI()
-    if ui.radiusLabel then
-        ui.radiusLabel.Text = string.format("Радиус захвата: %d", SETTINGS.CaptureRadius)
-    end
-
-    local alpha = (SETTINGS.CaptureRadius - SETTINGS.MinRadius) / (SETTINGS.MaxRadius - SETTINGS.MinRadius)
-    if ui.sliderFill then
-        ui.sliderFill.Size = UDim2.new(alpha, 0, 1, 0)
-    end
-    if ui.sliderKnob then
-        ui.sliderKnob.Position = UDim2.new(alpha, 0, 0.5, 0)
-    end
-
-    if ui.captureCircle and Workspace.CurrentCamera then
-        local cam = Workspace.CurrentCamera
-        local center = cam.ViewportSize * 0.5
-        local diameter = SETTINGS.CaptureRadius * 2
-        ui.captureCircle.Size = UDim2.fromOffset(diameter, diameter)
-        ui.captureCircle.Position = UDim2.fromOffset(center.X, center.Y)
-        ui.captureCircle.Visible = SETTINGS.AssistEnabled
-    end
-end
-
-local function setRadiusFromPixel(pixelX)
-    local relative = math.clamp((pixelX - sliderBar.AbsolutePosition.X) / sliderBar.AbsoluteSize.X, 0, 1)
-    SETTINGS.CaptureRadius = math.floor(SETTINGS.MinRadius + (SETTINGS.MaxRadius - SETTINGS.MinRadius) * relative + 0.5)
-    updateRadiusUI()
-end
-
-sliderBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingRadius = true
-        setRadiusFromPixel(input.Position.X)
-    end
-end)
-
--- button hooks
-espToggle.MouseButton1Click:Connect(function()
-    SETTINGS.ESPEnabled = not SETTINGS.ESPEnabled
-    espToggle.Text = SETTINGS.ESPEnabled and "ESP: ВКЛ" or "ESP: ВЫКЛ"
-    espToggle.BackgroundColor3 = SETTINGS.ESPEnabled and Color3.fromRGB(60, 138, 92) or Color3.fromRGB(145, 78, 78)
-    if not SETTINGS.ESPEnabled then
-        for player in pairs(highlights) do cleanupVisuals(player) end
-    end
-    setStatus("ESP " .. (SETTINGS.ESPEnabled and "включен" or "выключен"))
-end)
-
-teamToggle.MouseButton1Click:Connect(function()
-    SETTINGS.TeamCheck = not SETTINGS.TeamCheck
-    teamToggle.Text = SETTINGS.TeamCheck and "TeamCheck: ВКЛ" or "TeamCheck: ВЫКЛ"
-    refreshAllVisuals()
-end)
-
-infoToggle.MouseButton1Click:Connect(function()
-    SETTINGS.ShowInfo = not SETTINGS.ShowInfo
-    infoToggle.Text = SETTINGS.ShowInfo and "Info: ВКЛ" or "Info: ВЫКЛ"
-    refreshAllVisuals()
-end)
-
-assistToggle.MouseButton1Click:Connect(function()
-    SETTINGS.AssistEnabled = not SETTINGS.AssistEnabled
-    assistToggle.Text = SETTINGS.AssistEnabled and "Assist: ВКЛ" or "Assist: ВЫКЛ"
-    assistToggle.BackgroundColor3 = SETTINGS.AssistEnabled and Color3.fromRGB(60, 138, 92) or Color3.fromRGB(145, 78, 78)
-    setStatus("Assist " .. (SETTINGS.AssistEnabled and "включен" or "выключен"))
-end)
-
-aimBotToggle.MouseButton1Click:Connect(function()
-    SETTINGS.AimBotEnabled = not SETTINGS.AimBotEnabled
-    aimBotToggle.Text = SETTINGS.AimBotEnabled and "AimBot: ВКЛ" or "AimBot: ВЫКЛ"
-    aimBotToggle.BackgroundColor3 = SETTINGS.AimBotEnabled and Color3.fromRGB(60, 138, 92) or Color3.fromRGB(145, 78, 78)
-    if not SETTINGS.AimBotEnabled then
-        clearAimBotLock()
-    end
-end)
-
-inspectToggle.MouseButton1Click:Connect(function()
-    state.inspectorEnabled = not state.inspectorEnabled
-    inspectToggle.Text = state.inspectorEnabled and "Инспектор: ВКЛ" or "Инспектор: ВЫКЛ"
-    setStatus(state.inspectorEnabled and "Инспектор включен" or "Инспектор выключен")
-end)
-
-tpToTarget.MouseButton1Click:Connect(function()
-    local target = state.selectedObject
-    if not target then
-        setStatus("Нет выбранного объекта")
-        return
-    end
-
-    local destination
-    if target:IsA("BasePart") then
-        destination = target.CFrame
-    elseif target:IsA("Model") then
-        destination = target:GetPivot()
-    end
-
-    local root = getRootPart(getCharacter(LocalPlayer))
-    if root and destination then
-        root.CFrame = destination + Vector3.new(0, 4, 0)
-        setStatus("Телепорт выполнен к: " .. target.Name)
-    else
-        setStatus("Нельзя телепортироваться к этому объекту")
-    end
-end)
-
-copyCamXYZ.MouseButton1Click:Connect(function()
-    local cam = Workspace.CurrentCamera
-    if not cam then
-        setStatus("Камера недоступна")
-        return
-    end
-
-    local cf = cam.CFrame
-    local text = string.format(
-        "CFrame.new(%.3f, %.3f, %.3f) * CFrame.fromMatrix(Vector3.zero, Vector3.new(%.6f, %.6f, %.6f), Vector3.new(%.6f, %.6f, %.6f), Vector3.new(%.6f, %.6f, %.6f))",
-        cf.Position.X, cf.Position.Y, cf.Position.Z,
-        cf.XVector.X, cf.XVector.Y, cf.XVector.Z,
-        cf.YVector.X, cf.YVector.Y, cf.YVector.Z,
-        cf.ZVector.X, cf.ZVector.Y, cf.ZVector.Z
-    )
-
-    local copied = false
-    if typeof(setclipboard) == "function" then
-        setclipboard(text)
-        copied = true
-    elseif typeof(toclipboard) == "function" then
-        toclipboard(text)
-        copied = true
-    elseif typeof(clipboard_set) == "function" then
-        clipboard_set(text)
-        copied = true
-    end
-
-    setLog(text .. "\n\n" .. (copied and "Скопировано в буфер." or "Буфер недоступен, скопируйте вручную."))
-    setStatus("Camera CFrame обновлён")
-end)
-
-bananaToggle.MouseButton1Click:Connect(function()
-    state.bananaEnabled = not state.bananaEnabled
-    bananaToggle.Text = state.bananaEnabled and "Автосбор Bananas3: ВКЛ" or "Автосбор Bananas3: ВЫКЛ"
-    setStatus(state.bananaEnabled and "Автосбор Bananas3 включен" or "Автосбор Bananas3 выключен")
-end)
-
-bananaPulse.MouseButton1Click:Connect(function()
-    local moved = collectBananas3()
-    setStatus(string.format("Собрано за 1 раз: %d", moved))
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-    SETTINGS.ESPEnabled = false
-    SETTINGS.AssistEnabled = false
-    clearAimBotLock()
-    for player in pairs(highlights) do cleanupVisuals(player) end
-    screenGui:Destroy()
-end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then
-        return
-    end
-
-    if input.UserInputType == Enum.UserInputType.MouseButton1 and state.inspectorEnabled then
-        local camera = Workspace.CurrentCamera
-        if camera then
-            local mousePos = UserInputService:GetMouseLocation()
-            local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Blacklist
-            params.RespectCanCollide = false
-            params.IgnoreWater = false
-            params.FilterDescendantsInstances = {getCharacter(LocalPlayer)}
-
-            local result = Workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
-            local target = result and result.Instance or LocalPlayer:GetMouse().Target
-            if target then
-                state.selectedObject = target
-                setLog(buildInfo(target))
-                setStatus("Выбран объект: " .. target:GetFullName())
-            else
-                setStatus("Объект не найден")
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
             end
-        end
+        end)
     end
+end)
 
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        state.aimHoldingRMB = true
+topbar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        local delta = input.Position - dragStart
+        window.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        state.draggingRadius = false
-        state.draggingWindow = false
-    end
-
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        state.aimHoldingRMB = false
-        clearAimBotLock()
+        dragging = false
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    if state.draggingWindow and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-
-    if state.draggingRadius and input.UserInputType == Enum.UserInputType.MouseMovement then
-        setRadiusFromPixel(input.Position.X)
-    end
+collapseBtn.MouseButton1Click:Connect(function()
+    state.collapsed = not state.collapsed
+    applyCollapsedState()
 end)
 
-Players.PlayerRemoving:Connect(function(player)
-    cleanupVisuals(player)
+bananaToggle.MouseButton1Click:Connect(function()
+    state.bananaEnabled = not state.bananaEnabled
+    bananaToggle.Text = state.bananaEnabled and "Автосбор Bananas3: ВКЛ" or "Автосбор Bananas3: ВЫКЛ"
+    setStatus("Автосбор " .. (state.bananaEnabled and "включен" or "выключен"))
 end)
 
-LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
-    refreshAllVisuals()
+bananaPulse.MouseButton1Click:Connect(function()
+    local count = collectBananas3()
+    setStatus("Собрано Bananas3: " .. count)
 end)
 
-RunService.RenderStepped:Connect(function(deltaTime)
-    refreshAccumulator += deltaTime
-    if refreshAccumulator >= SETTINGS.RefreshInterval then
-        refreshAccumulator = 0
-        refreshAllVisuals()
-    end
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
 
-    state.aimHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-
+RunService.RenderStepped:Connect(function()
     if state.bananaEnabled then
         collectBananas3()
     end
-
-    updateRadiusUI()
-    updateAssist()
 end)
 
-activateTab("ESP")
-updateRadiusUI()
+applyCollapsedState()
+setStatus("Bananas-only режим")
