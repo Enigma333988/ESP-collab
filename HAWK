@@ -1,1 +1,31 @@
+-- HAWK: auto-collect Bananas3 by teleporting them to the local player
 
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local localPlayer = Players.LocalPlayer
+
+local function getCharacter()
+    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
+    return character, humanoidRootPart
+end
+
+local function teleportBananas3ToPlayer()
+    local _, rootPart = getCharacter()
+    local prefabs = Workspace:FindFirstChild("Prefabs")
+    if not prefabs then
+        return
+    end
+
+    for _, instance in ipairs(prefabs:GetChildren()) do
+        if instance.Name == "Bananas3" and instance:IsA("MeshPart") then
+            instance.CFrame = rootPart.CFrame
+        end
+    end
+end
+
+-- Keep collecting new/respawned Bananas3 automatically
+while task.wait(0.1) do
+    teleportBananas3ToPlayer()
+end
