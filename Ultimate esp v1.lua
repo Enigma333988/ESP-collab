@@ -40,7 +40,7 @@ local trackedConnections = {}
 local globalConnections = {}
 
 local aimHoldingRMB = false
-local draggingSlider = false
+local draggingSliderType = nil
 local refreshAccumulator = 0
 local scriptActive = true
 
@@ -59,6 +59,11 @@ local uiRefs = {
     sliderBar = nil,
     sliderFill = nil,
     sliderKnob = nil,
+    aimDistanceLabel = nil,
+    aimDistanceSliderBar = nil,
+    aimDistanceSliderFill = nil,
+    aimDistanceSliderKnob = nil,
+    aimDistanceHint = nil,
     captureCircle = nil,
     screenGui = nil,
     panel = nil,
@@ -287,6 +292,18 @@ local function updateRadiusUI()
         uiRefs.sliderKnob.Position = UDim2.new(alpha, 0, 0.5, 0)
     end
 
+    if uiRefs.aimDistanceLabel then
+        uiRefs.aimDistanceLabel.Text = string.format("Дистанция AimBot: %.1fм", SETTINGS.AimBotFollowDistance)
+    end
+
+    if uiRefs.aimDistanceSliderFill and uiRefs.aimDistanceSliderKnob then
+        local minDistance = 1
+        local maxDistance = 10
+        local alpha = (SETTINGS.AimBotFollowDistance - minDistance) / (maxDistance - minDistance)
+        uiRefs.aimDistanceSliderFill.Size = UDim2.new(alpha, 0, 1, 0)
+        uiRefs.aimDistanceSliderKnob.Position = UDim2.new(alpha, 0, 0.5, 0)
+    end
+
     if uiRefs.captureCircle and camera then
         local center = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5)
         local diameter = SETTINGS.CaptureRadius * 2
@@ -304,6 +321,20 @@ local function setRadiusFromPixel(pixelX)
 
     local relative = math.clamp((pixelX - sliderBar.AbsolutePosition.X) / sliderBar.AbsoluteSize.X, 0, 1)
     SETTINGS.CaptureRadius = math.floor(SETTINGS.MinRadius + (SETTINGS.MaxRadius - SETTINGS.MinRadius) * relative + 0.5)
+    updateRadiusUI()
+end
+
+local function setAimBotDistanceFromPixel(pixelX)
+    local sliderBar = uiRefs.aimDistanceSliderBar
+    if not sliderBar then
+        return
+    end
+
+    local minDistance = 1
+    local maxDistance = 10
+    local relative = math.clamp((pixelX - sliderBar.AbsolutePosition.X) / sliderBar.AbsoluteSize.X, 0, 1)
+    local value = minDistance + (maxDistance - minDistance) * relative
+    SETTINGS.AimBotFollowDistance = math.floor(value * 10 + 0.5) / 10
     updateRadiusUI()
 end
 
@@ -513,7 +544,7 @@ local function shutdownScript()
 
     scriptActive = false
     aimHoldingRMB = false
-    draggingSlider = false
+    draggingSliderType = nil
     draggingWindow = false
     SETTINGS.ESPEnabled = false
     SETTINGS.AssistEnabled = false
@@ -544,8 +575,8 @@ local function createUi()
 
     local panel = Instance.new("Frame")
     panel.Name = "Panel"
-    panel.Size = UDim2.new(0, 250, 0, 294)
-    panel.Position = UDim2.new(0, 20, 0.5, -147)
+    panel.Size = UDim2.new(0, 250, 0, 360)
+    panel.Position = UDim2.new(0, 20, 0.5, -180)
     panel.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     panel.BorderSizePixel = 0
     panel.Parent = screenGui
@@ -656,16 +687,59 @@ local function createUi()
     sliderKnobCorner.CornerRadius = UDim.new(1, 0)
     sliderKnobCorner.Parent = uiRefs.sliderKnob
 
-    local hint = Instance.new("TextLabel")
-    hint.BackgroundTransparency = 1
-    hint.Size = UDim2.new(1, -20, 0, 16)
-    hint.Position = UDim2.new(0, 10, 0, 248)
-    hint.Font = Enum.Font.Gotham
-    hint.TextSize = 12
-    hint.TextColor3 = Color3.fromRGB(170, 170, 170)
-    hint.TextXAlignment = Enum.TextXAlignment.Left
-    hint.Text = "ПКМ: фикс цели и следование за спиной (2м)"
-    hint.Parent = panel
+    uiRefs.aimDistanceLabel = Instance.new("TextLabel")
+    uiRefs.aimDistanceLabel.BackgroundTransparency = 1
+    uiRefs.aimDistanceLabel.Size = UDim2.new(1, -20, 0, 20)
+    uiRefs.aimDistanceLabel.Position = UDim2.new(0, 10, 0, 248)
+    uiRefs.aimDistanceLabel.Font = Enum.Font.Gotham
+    uiRefs.aimDistanceLabel.TextSize = 13
+    uiRefs.aimDistanceLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    uiRefs.aimDistanceLabel.TextXAlignment = Enum.TextXAlignment.Left
+    uiRefs.aimDistanceLabel.Parent = panel
+
+    uiRefs.aimDistanceSliderBar = Instance.new("Frame")
+    uiRefs.aimDistanceSliderBar.Size = UDim2.new(1, -20, 0, 10)
+    uiRefs.aimDistanceSliderBar.Position = UDim2.new(0, 10, 0, 274)
+    uiRefs.aimDistanceSliderBar.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    uiRefs.aimDistanceSliderBar.BorderSizePixel = 0
+    uiRefs.aimDistanceSliderBar.Parent = panel
+
+    local aimDistanceSliderBarCorner = Instance.new("UICorner")
+    aimDistanceSliderBarCorner.CornerRadius = UDim.new(1, 0)
+    aimDistanceSliderBarCorner.Parent = uiRefs.aimDistanceSliderBar
+
+    uiRefs.aimDistanceSliderFill = Instance.new("Frame")
+    uiRefs.aimDistanceSliderFill.Size = UDim2.new(0, 0, 1, 0)
+    uiRefs.aimDistanceSliderFill.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
+    uiRefs.aimDistanceSliderFill.BorderSizePixel = 0
+    uiRefs.aimDistanceSliderFill.Parent = uiRefs.aimDistanceSliderBar
+
+    local aimDistanceSliderFillCorner = Instance.new("UICorner")
+    aimDistanceSliderFillCorner.CornerRadius = UDim.new(1, 0)
+    aimDistanceSliderFillCorner.Parent = uiRefs.aimDistanceSliderFill
+
+    uiRefs.aimDistanceSliderKnob = Instance.new("Frame")
+    uiRefs.aimDistanceSliderKnob.Size = UDim2.new(0, 14, 0, 14)
+    uiRefs.aimDistanceSliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+    uiRefs.aimDistanceSliderKnob.Position = UDim2.new(0, 0, 0.5, 0)
+    uiRefs.aimDistanceSliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    uiRefs.aimDistanceSliderKnob.BorderSizePixel = 0
+    uiRefs.aimDistanceSliderKnob.Parent = uiRefs.aimDistanceSliderBar
+
+    local aimDistanceSliderKnobCorner = Instance.new("UICorner")
+    aimDistanceSliderKnobCorner.CornerRadius = UDim.new(1, 0)
+    aimDistanceSliderKnobCorner.Parent = uiRefs.aimDistanceSliderKnob
+
+    uiRefs.aimDistanceHint = Instance.new("TextLabel")
+    uiRefs.aimDistanceHint.BackgroundTransparency = 1
+    uiRefs.aimDistanceHint.Size = UDim2.new(1, -20, 0, 16)
+    uiRefs.aimDistanceHint.Position = UDim2.new(0, 10, 0, 294)
+    uiRefs.aimDistanceHint.Font = Enum.Font.Gotham
+    uiRefs.aimDistanceHint.TextSize = 12
+    uiRefs.aimDistanceHint.TextColor3 = Color3.fromRGB(170, 170, 170)
+    uiRefs.aimDistanceHint.TextXAlignment = Enum.TextXAlignment.Left
+    uiRefs.aimDistanceHint.Text = "ПКМ: фикс цели и следование за спиной"
+    uiRefs.aimDistanceHint.Parent = panel
 
     uiRefs.captureCircle = Instance.new("Frame")
     uiRefs.captureCircle.Name = "CaptureCircle"
@@ -691,8 +765,19 @@ local function createUi()
         end
 
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            draggingSlider = true
+            draggingSliderType = "capture"
             setRadiusFromPixel(input.Position.X)
+        end
+    end))
+
+    addConnection(uiRefs.aimDistanceSliderBar.InputBegan:Connect(function(input)
+        if not scriptActive then
+            return
+        end
+
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingSliderType = "distance"
+            setAimBotDistanceFromPixel(input.Position.X)
         end
     end))
 
@@ -813,7 +898,7 @@ addConnection(UserInputService.InputEnded:Connect(function(input)
     end
 
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        draggingSlider = false
+        draggingSliderType = nil
         draggingWindow = false
     end
 
@@ -828,8 +913,10 @@ addConnection(UserInputService.InputChanged:Connect(function(input)
         return
     end
 
-    if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
+    if draggingSliderType == "capture" and input.UserInputType == Enum.UserInputType.MouseMovement then
         setRadiusFromPixel(input.Position.X)
+    elseif draggingSliderType == "distance" and input.UserInputType == Enum.UserInputType.MouseMovement then
+        setAimBotDistanceFromPixel(input.Position.X)
     end
 
     if draggingWindow and input.UserInputType == Enum.UserInputType.MouseMovement and dragStartMouse and dragStartPos then
