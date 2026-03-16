@@ -2,13 +2,19 @@
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+local WINDOW_EXPANDED_HEIGHT = 200
+local WINDOW_COLLAPSED_HEIGHT = 40
+
 local state = {
     bananaEnabled = false,
     draggingWindow = false,
+    collapsed = false,
 }
 
 local ui = {}
@@ -55,9 +61,15 @@ local function collectBananas3()
 end
 
 local function setStatus(text)
-    if ui and ui.statusBar then
+    if ui.statusBar then
         ui.statusBar.Text = "  " .. text
     end
+end
+
+local function applyCollapsedState()
+    ui.content.Visible = not state.collapsed
+    ui.window.Size = UDim2.fromOffset(360, state.collapsed and WINDOW_COLLAPSED_HEIGHT or WINDOW_EXPANDED_HEIGHT)
+    ui.collapseBtn.Text = state.collapsed and "▢" or "—"
 end
 
 -- ---------- UI ----------
@@ -74,11 +86,12 @@ screenGui.Parent = PlayerGui
 ui.screenGui = screenGui
 
 local window = Instance.new("Frame")
-window.Size = UDim2.fromOffset(360, 200)
+window.Size = UDim2.fromOffset(360, WINDOW_EXPANDED_HEIGHT)
 window.Position = UDim2.new(0.5, -180, 0.5, -100)
 window.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 window.BorderSizePixel = 0
 window.Parent = screenGui
+ui.window = window
 
 local windowCorner = Instance.new("UICorner")
 windowCorner.CornerRadius = UDim.new(0, 12)
@@ -95,7 +108,7 @@ topCorner.CornerRadius = UDim.new(0, 12)
 topCorner.Parent = topbar
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -96, 1, 0)
+title.Size = UDim2.new(1, -140, 1, 0)
 title.Position = UDim2.fromOffset(12, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
@@ -104,6 +117,22 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(240, 245, 255)
 title.Text = "HAWK | Bananas"
 title.Parent = topbar
+
+local collapseBtn = Instance.new("TextButton")
+collapseBtn.Size = UDim2.fromOffset(28, 26)
+collapseBtn.Position = UDim2.new(1, -114, 0.5, -13)
+collapseBtn.BackgroundColor3 = Color3.fromRGB(70, 88, 120)
+collapseBtn.BorderSizePixel = 0
+collapseBtn.Font = Enum.Font.GothamBold
+collapseBtn.TextSize = 16
+collapseBtn.Text = "—"
+collapseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+collapseBtn.Parent = topbar
+ui.collapseBtn = collapseBtn
+
+local collapseCorner = Instance.new("UICorner")
+collapseCorner.CornerRadius = UDim.new(0, 8)
+collapseCorner.Parent = collapseBtn
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.fromOffset(72, 26)
@@ -120,16 +149,23 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 8)
 closeCorner.Parent = closeBtn
 
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, 0, 1, -40)
+content.Position = UDim2.fromOffset(0, 40)
+content.BackgroundTransparency = 1
+content.Parent = window
+ui.content = content
+
 local bananaToggle = Instance.new("TextButton")
 bananaToggle.Size = UDim2.fromOffset(220, 40)
-bananaToggle.Position = UDim2.fromOffset(12, 56)
+bananaToggle.Position = UDim2.fromOffset(12, 16)
 bananaToggle.BackgroundColor3 = Color3.fromRGB(176, 138, 56)
 bananaToggle.BorderSizePixel = 0
 bananaToggle.Font = Enum.Font.GothamSemibold
 bananaToggle.TextSize = 14
 bananaToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 bananaToggle.Text = "Автосбор Bananas3: ВЫКЛ"
-bananaToggle.Parent = window
+bananaToggle.Parent = content
 
 local bananaToggleCorner = Instance.new("UICorner")
 bananaToggleCorner.CornerRadius = UDim.new(0, 8)
@@ -137,14 +173,14 @@ bananaToggleCorner.Parent = bananaToggle
 
 local bananaPulse = Instance.new("TextButton")
 bananaPulse.Size = UDim2.fromOffset(112, 40)
-bananaPulse.Position = UDim2.fromOffset(236, 56)
+bananaPulse.Position = UDim2.fromOffset(236, 16)
 bananaPulse.BackgroundColor3 = Color3.fromRGB(100, 124, 64)
 bananaPulse.BorderSizePixel = 0
 bananaPulse.Font = Enum.Font.GothamSemibold
 bananaPulse.TextSize = 14
 bananaPulse.TextColor3 = Color3.fromRGB(255, 255, 255)
 bananaPulse.Text = "Собрать"
-bananaPulse.Parent = window
+bananaPulse.Parent = content
 
 local bananaPulseCorner = Instance.new("UICorner")
 bananaPulseCorner.CornerRadius = UDim.new(0, 8)
@@ -183,6 +219,17 @@ topbar.InputEnded:Connect(function(input)
     end
 end)
 
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        state.draggingWindow = false
+    end
+end)
+
+collapseBtn.MouseButton1Click:Connect(function()
+    state.collapsed = not state.collapsed
+    applyCollapsedState()
+end)
+
 bananaToggle.MouseButton1Click:Connect(function()
     state.bananaEnabled = not state.bananaEnabled
     bananaToggle.Text = state.bananaEnabled and "Автосбор Bananas3: ВКЛ" or "Автосбор Bananas3: ВЫКЛ"
@@ -198,15 +245,9 @@ closeBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-    if not screenGui.Parent then
-        return
-    end
-end)
-
-game:GetService("RunService").RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function()
     if state.draggingWindow and dragStart and startPos then
-        local delta = game:GetService("UserInputService"):GetMouseLocation() - dragStart
+        local delta = UserInputService:GetMouseLocation() - dragStart
         window.Position = UDim2.new(
             startPos.X.Scale,
             startPos.X.Offset + delta.X,
@@ -220,4 +261,5 @@ game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
+applyCollapsedState()
 setStatus("Bananas-only режим")
