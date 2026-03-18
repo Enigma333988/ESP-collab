@@ -813,6 +813,10 @@ end
 -- Клик по объекту в мире
 -- =========================
 local function getTargetUnderCursor()
+	local mouse = player:GetMouse()
+	local mouseTarget = mouse.Target
+	local mouseTargetIsUsable = mouseTarget and mouseTarget ~= workspace.Terrain
+
 	local mousePos = UIS:GetMouseLocation()
 	local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
 	local params = RaycastParams.new()
@@ -828,11 +832,14 @@ local function getTargetUnderCursor()
 
 	local result = workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
 	if result then
-		return result.Instance
+		local rayTarget = result.Instance
+		if rayTarget == workspace.Terrain and mouseTargetIsUsable then
+			return mouseTarget
+		end
+		return rayTarget
 	end
 
-	local mouse = player:GetMouse()
-	return mouse.Target
+	return mouseTarget
 end
 
 connect(UIS.InputBegan, function(input, gameProcessed)
