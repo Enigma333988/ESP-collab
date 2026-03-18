@@ -249,6 +249,7 @@ local cursorHotkey = "Ctrl+M"
 local lastCollectedInfo = nil
 local lastClickedTarget = nil
 local lootTrackingEnabled = false
+local characterTrackingStates = setmetatable({}, { __mode = "k" })
 
 local flyMode = false
 local flyMove = {
@@ -293,12 +294,46 @@ local function copyText(text)
 	return false
 end
 
-local function getRootPart()
-	local character = player.Character
+local function findCharacterRootPart(character)
 	if not character then
 		return nil
 	end
-	return character:FindFirstChild("HumanoidRootPart")
+
+	local preferred = {
+		character:FindFirstChild("HumanoidRootPart"),
+		character.PrimaryPart,
+		character:FindFirstChild("RootPart"),
+		character:FindFirstChild("UpperTorso"),
+		character:FindFirstChild("Torso"),
+		character:FindFirstChild("Head"),
+	}
+	for _, candidate in ipairs(preferred) do
+		if candidate and candidate:IsA("BasePart") then
+			return candidate
+		end
+	end
+
+	local bestPart = nil
+	local bestScore = -math.huge
+	for _, desc in ipairs(character:GetDescendants()) do
+		if desc:IsA("BasePart") then
+			local size = desc.Size
+			local score = (size.X * size.Y * size.Z)
+			if desc.Name:lower():find("root") then
+				score += 1000000
+			end
+			if score > bestScore then
+				bestScore = score
+				bestPart = desc
+			end
+		end
+	end
+
+	return bestPart
+end
+
+local function getRootPart()
+	return findCharacterRootPart(player.Character)
 end
 
 local function resolveFlyTarget()
@@ -308,12 +343,12 @@ local function resolveFlyTarget()
 	end
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local root = character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not root then
-		return nil, nil, "Не найден Humanoid/HumanoidRootPart."
+	local root = findCharacterRootPart(character)
+	if not root then
+		return nil, humanoid, "Не найдена опорная часть персонажа."
 	end
 
-	local seat = humanoid.SeatPart
+	local seat = humanoid and humanoid.SeatPart
 	if seat and seat:IsA("VehicleSeat") then
 		local vehicleRoot = seat.AssemblyRootPart or seat
 		return vehicleRoot, humanoid, "vehicle"
@@ -332,6 +367,23 @@ local function setPickupButtonState()
 	end
 end
 
+local function formatCollectedInfo(info)
+	if not info then
+		return "Пока нет зафиксированных событий лута."
+	end
+
+	local lines = {
+		("Время: %s"):format(os.date("%Y-%m-%d %H:%M:%S", info.time)),
+		("Источник: %s"):format(info.source),
+		("Объект: %s (%s)"):format(info.name, info.className),
+		("Путь: %s"):format(info.fullName),
+	}
+	if info.extra and info.extra ~= "" then
+		table.insert(lines, ("Детали: %s"):format(info.extra))
+	end
+	return table.concat(lines, "\n")
+end
+
 local function rememberCollected(source, inst, extra)
 	if not lootTrackingEnabled then return end
 
@@ -346,6 +398,56 @@ local function rememberCollected(source, inst, extra)
 		fullName = fullName,
 		extra = extra,
 	}
+
+	if source ~= "Character.Touched" then
+		openWindow(formatCollectedInfo(lastCollectedInfo), "Лут")
+	end
+end
+
+local function getCharacterBoundingVolume(character)
+	if not character then
+		return nil, nil
+	end
+
+	local ok, _, size = pcall(character.GetBoundingBox, character)
+	if not ok or not size then
+		return nil, nil
+	end
+
+	return size.X * size.Y * size.Z, size
+end
+
+local function scheduleCharacterGrowthCheck(character, reason, inst)
+	if not character then return end
+
+	local state = characterTrackingStates[character]
+	if not state then
+		state = {}
+		characterTrackingStates[character] = state
+	end
+	state.pendingReason = reason
+	state.pendingInst = inst or character
+	if state.pending then return end
+	state.pending = true
+
+	task.defer(function()
+		state.pending = false
+		if not running or not character.Parent then return end
+
+		local newVolume, newSize = getCharacterBoundingVolume(character)
+		if not newVolume then return end
+
+		local oldVolume = state.volume
+		state.volume = newVolume
+		state.size = newSize
+		if not oldVolume then return end
+
+		local volumeDelta = newVolume - oldVolume
+		if volumeDelta > math.max(0.05, oldVolume * 0.03) then
+			local extra = ("Размер персонажа вырос: %.3f -> %.3f (%s)"):format(oldVolume, newVolume, state.pendingReason or reason)
+			rememberCollected("Character.Growth", state.pendingInst or inst or character, extra)
+		end
+	end)
 end
 local function stopFlyMode()
 	if not flyMode then return end
@@ -378,7 +480,7 @@ local function startFlyMode()
 	if flyMode or not running then return end
 	local targetPart, humanoid, targetKind = resolveFlyTarget()
 	if not targetPart then
-		openWindow("Не удалось включить полёт: цель не найдена.", "Крылья")
+		openWindow("Не удалось включить полёт: " .. tostring(targetKind), "Крылья")
 		return
 	end
 	flyMode = true
@@ -544,7 +646,15 @@ connect(pickupBtn.MouseButton1Click, function()
 	setPickupButtonState()
 
 	if lootTrackingEnabled then
-		openWindow("Трекинг лута включён. Теперь события подбора будут записываться.", "Лут")
+		local root = getRootPart()
+		local rootName = root and root:GetFullName() or "не найдена"
+		local status = "Трекинг лута включён."
+		if lastCollectedInfo then
+			status = status .. "\n\nПоследнее событие:\n" .. formatCollectedInfo(lastCollectedInfo)
+		else
+			status = status .. "\nОжидание событий подбора/роста.\nОпорная часть персонажа: " .. rootName
+		end
+		openWindow(status, "Лут")
 	else
 		openWindow("Трекинг лута выключен. События больше не читаются в реальном времени.", "Лут")
 	end
@@ -562,7 +672,7 @@ connect(teleportBtn.MouseButton1Click, function()
 	if not running then return end
 	local root = getRootPart()
 	if not root then
-		openWindow("Не найден HumanoidRootPart. Персонаж не загружен.", "Телепорт")
+		openWindow("Не найдена опорная часть персонажа. Персонаж ещё не загружен или имеет нестандартную модель.", "Телепорт")
 		return
 	end
 	root.CFrame = camera.CFrame
@@ -584,11 +694,19 @@ end)
 local function hookCharacterTracking(character)
 	if not character then return end
 
+	scheduleCharacterGrowthCheck(character, "InitialSnapshot", character)
+
 	connect(character.ChildAdded, function(child)
 		if not running then return end
-		if child:IsA("Accessory") or child:IsA("Tool") then
-			rememberCollected("Character.ChildAdded", child, "Новый предмет применён к персонажу")
+		if child:IsA("Accessory") or child:IsA("Tool") or child:IsA("Model") or child:IsA("BasePart") then
+			rememberCollected("Character.ChildAdded", child, "Новый объект применён к персонажу")
+			scheduleCharacterGrowthCheck(character, "ChildAdded:" .. child.ClassName, child)
 		end
+	end)
+
+	connect(character.ChildRemoved, function(child)
+		if not running then return end
+		scheduleCharacterGrowthCheck(character, "ChildRemoved:" .. child.ClassName, child)
 	end)
 end
 
@@ -599,6 +717,10 @@ local function hookCharacterTouchTracking(character)
 				if not running or not hit then return end
 				if hit:IsDescendantOf(character) then return end
 				rememberCollected("Character.Touched", hit, "Касание персонажа")
+			end)
+			connect(desc:GetPropertyChangedSignal("Size"), function()
+				if not running then return end
+				scheduleCharacterGrowthCheck(character, "SizeChanged:" .. desc.Name, desc)
 			end)
 		end
 	end
@@ -611,6 +733,18 @@ local function hookCharacterTouchTracking(character)
 				if hit:IsDescendantOf(character) then return end
 				rememberCollected("Character.Touched", hit, "Касание персонажа")
 			end)
+			connect(desc:GetPropertyChangedSignal("Size"), function()
+				if not running then return end
+				scheduleCharacterGrowthCheck(character, "SizeChanged:" .. desc.Name, desc)
+			end)
+			scheduleCharacterGrowthCheck(character, "DescendantAdded:" .. desc.ClassName, desc)
+		end
+	end)
+
+	connect(character.DescendantRemoving, function(desc)
+		if not running then return end
+		if desc:IsA("BasePart") then
+			scheduleCharacterGrowthCheck(character, "DescendantRemoving:" .. desc.ClassName, desc)
 		end
 	end)
 end
