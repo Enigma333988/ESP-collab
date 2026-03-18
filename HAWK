@@ -1,9 +1,8 @@
--- HAWK auto-ammo teleport script
--- Teleports to 4 ammo platforms one by one, presses E, then returns to start position.
+-- HAWK egg route teleporter script
+-- Teleports the local player/dinosaur to each nearest DinosaurEgg.002 one by one.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 
 local localPlayer = Players.LocalPlayer
@@ -16,25 +15,77 @@ local state = {
     running = false,
 }
 
-local function getRoot()
-    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
-    return character:WaitForChild("HumanoidRootPart")
+local ROOT_CANDIDATES = {
+    "HumanoidRootPart",
+    "UpperTorso",
+    "LowerTorso",
+    "Torso",
+    "Body",
+    "Head",
+}
+
+local function getCharacter()
+    return localPlayer.Character or localPlayer.CharacterAdded:Wait()
+end
+
+local function getRootPart()
+    local character = getCharacter()
+
+    for _, partName in ipairs(ROOT_CANDIDATES) do
+        local part = character:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            return part
+        end
+    end
+
+    if character.PrimaryPart and character.PrimaryPart:IsA("BasePart") then
+        return character.PrimaryPart
+    end
+
+    for _, child in ipairs(character:GetChildren()) do
+        if child:IsA("BasePart") then
+            return child
+        end
+    end
+end
+
+local function getPlayerAnchorCFrame()
+    local root = getRootPart()
+    if root then
+        return root.CFrame
+    end
+
+    local character = getCharacter()
+    return character:GetPivot()
+end
+
+local function teleportCharacterTo(targetPart)
+    local character = getCharacter()
+    local root = getRootPart()
+    local targetPosition = targetPart.Position + Vector3.new(0, 4, 0)
+    local lookAt = Vector3.new(targetPart.Position.X, targetPosition.Y, targetPart.Position.Z)
+    local targetCFrame = CFrame.lookAt(targetPosition, lookAt)
+
+    if root then
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        root.CFrame = targetCFrame
+        return
+    end
+
+    character:PivotTo(targetCFrame)
+end
+
+local function isEggTarget(desc)
+    return desc:IsA("MeshPart") and desc.Name == "DinosaurEgg.002"
 end
 
 local function findTargets()
     local targets = {}
 
     for _, desc in ipairs(workspace:GetDescendants()) do
-        if desc:IsA("MeshPart") and desc.Name == "Cube.028_Cube.044" then
-            local parentModel = desc.Parent
-            local dispenserModel = parentModel and parentModel.Parent
-
-            if parentModel and parentModel.Name == "Model" and dispenserModel and dispenserModel:IsA("Model") then
-                local dispenserName = dispenserModel.Name
-                if dispenserName:find("AmmoDispenser") then
-                    table.insert(targets, desc)
-                end
-            end
+        if isEggTarget(desc) then
+            table.insert(targets, desc)
         end
     end
 
@@ -42,23 +93,29 @@ local function findTargets()
         return a:GetFullName() < b:GetFullName()
     end)
 
-    local result = {}
-    for i = 1, math.min(4, #targets) do
-        result[i] = targets[i]
+    return targets
+end
+
+local function popNearestTarget(anchorPosition, targets)
+    local nearestIndex
+    local nearestDistance
+
+    for index, target in ipairs(targets) do
+        if target and target.Parent then
+            local distance = (target.Position - anchorPosition).Magnitude
+            if not nearestDistance or distance < nearestDistance then
+                nearestDistance = distance
+                nearestIndex = index
+            end
+        end
     end
 
-    return result
-end
+    if not nearestIndex then
+        return nil, nil
+    end
 
-local function pressE()
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-    task.wait(0.08)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-end
-
-local function teleportTo(part)
-    local root = getRoot()
-    root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
+    local nearestTarget = table.remove(targets, nearestIndex)
+    return nearestTarget, nearestDistance
 end
 
 local function runLoop(statusLabel)
@@ -67,32 +124,35 @@ local function runLoop(statusLabel)
 
     task.spawn(function()
         while state.enabled and not state.closed do
-            local root = getRoot()
-            local startCFrame = root.CFrame
-
+            local anchorCFrame = getPlayerAnchorCFrame()
             local targets = findTargets()
-            if #targets < 4 then
-                statusLabel.Text = "Статус: нужно 4 платформы (найдено " .. tostring(#targets) .. ")"
+
+            if not anchorCFrame then
+                statusLabel.Text = "Статус: не удалось определить позицию персонажа/динозавра"
+                task.wait(1)
+            elseif #targets == 0 then
+                statusLabel.Text = "Статус: яйца DinosaurEgg.002 не найдены"
                 task.wait(1)
             else
-                statusLabel.Text = "Статус: выполняю обход 4 платформ"
-                for _, target in ipairs(targets) do
-                    if not state.enabled or state.closed then
+                local visited = 0
+                local currentPosition = anchorCFrame.Position
+
+                while state.enabled and not state.closed and #targets > 0 do
+                    local nearestEgg, nearestDistance = popNearestTarget(currentPosition, targets)
+                    if not nearestEgg then
                         break
                     end
 
-                    if target and target.Parent then
-                        teleportTo(target)
-                        task.wait(0.25)
-                        pressE()
-                        task.wait(0.35)
-                    end
+                    statusLabel.Text = string.format("Статус: телепорт к яйцу %d, дистанция %.1f", visited + 1, nearestDistance or 0)
+                    teleportCharacterTo(nearestEgg)
+                    visited += 1
+                    currentPosition = nearestEgg.Position
+                    task.wait(0.2)
                 end
 
-                if state.enabled and not state.closed then
-                    root.CFrame = startCFrame
-                    statusLabel.Text = "Статус: цикл завершён, возврат в исходную точку"
-                    task.wait(0.6)
+                if visited > 0 then
+                    statusLabel.Text = string.format("Статус: посещено яиц: %d", visited)
+                    task.wait(0.3)
                 end
             end
 
@@ -146,7 +206,7 @@ local function makeDraggable(topBar, frame)
 end
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "HAWK_AutoPlatforms"
+screenGui.Name = "HAWK_EggRouteTeleporter"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
@@ -175,7 +235,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -120, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
-title.Text = "HAWK Auto Platforms"
+title.Text = "HAWK Egg Route"
 title.TextColor3 = Color3.fromRGB(240, 240, 240)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Font = Enum.Font.GothamSemibold
@@ -257,7 +317,7 @@ toggleBtn.MouseButton1Click:Connect(function()
     if state.enabled then
         toggleBtn.Text = "ВЫКЛЮЧИТЬ"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(177, 65, 65)
-        statusLabel.Text = "Статус: запуск..."
+        statusLabel.Text = "Статус: запуск маршрута по яйцам..."
         runLoop(statusLabel)
     else
         toggleBtn.Text = "ВКЛЮЧИТЬ"
