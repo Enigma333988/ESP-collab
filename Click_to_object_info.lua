@@ -812,6 +812,73 @@ end
 -- =========================
 -- Клик по объекту в мире
 -- =========================
+local function getInspectableAncestor(inst)
+	if not inst then return nil end
+
+	local current = inst
+	if current:IsA("ProximityPrompt") or current:IsA("ClickDetector") or current:IsA("TouchTransmitter") then
+		current = current.Parent
+	elseif current:IsA("Attachment") then
+		current = current.Parent
+	end
+
+	local candidate = current
+	while candidate and candidate ~= workspace do
+		if candidate:IsA("Model") and candidate ~= player.Character then
+			return candidate
+		end
+		candidate = candidate.Parent
+	end
+
+	return current
+end
+
+local function getInteractiveWorldPosition(inst)
+	if inst:IsA("ProximityPrompt") then
+		local parent = inst.Parent
+		if parent and parent:IsA("Attachment") then
+			return parent.WorldPosition
+		elseif parent and parent:IsA("BasePart") then
+			return parent.Position
+		end
+	elseif inst:IsA("ClickDetector") or inst:IsA("TouchTransmitter") then
+		local parent = inst.Parent
+		if parent and parent:IsA("BasePart") then
+			return parent.Position
+		end
+	end
+	return nil
+end
+
+local function getInteractiveTargetNearCursor(mousePos)
+	local bestTarget = nil
+	local bestScore = math.huge
+
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		if inst:IsA("ProximityPrompt") or inst:IsA("ClickDetector") or inst:IsA("TouchTransmitter") then
+			local worldPos = getInteractiveWorldPosition(inst)
+			if worldPos then
+				local screenPos, onScreen = camera:WorldToViewportPoint(worldPos)
+				if onScreen and screenPos.Z > 0 then
+					local dx = screenPos.X - mousePos.X
+					local dy = screenPos.Y - mousePos.Y
+					local pixelDist = math.sqrt(dx * dx + dy * dy)
+					if pixelDist <= 80 then
+						local depthPenalty = math.abs(screenPos.Z) * 0.05
+						local score = pixelDist + depthPenalty
+						if score < bestScore then
+							bestScore = score
+							bestTarget = getInspectableAncestor(inst)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return bestTarget
+end
+
 local function getTargetUnderCursor()
 	local mouse = player:GetMouse()
 	local mouseTarget = mouse.Target
@@ -833,13 +900,21 @@ local function getTargetUnderCursor()
 	local result = workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
 	if result then
 		local rayTarget = result.Instance
-		if rayTarget == workspace.Terrain and mouseTargetIsUsable then
-			return mouseTarget
+		if rayTarget ~= workspace.Terrain then
+			return getInspectableAncestor(rayTarget)
 		end
-		return rayTarget
 	end
 
-	return mouseTarget
+	local interactiveTarget = getInteractiveTargetNearCursor(mousePos)
+	if interactiveTarget then
+		return interactiveTarget
+	end
+
+	if mouseTargetIsUsable then
+		return getInspectableAncestor(mouseTarget)
+	end
+
+	return nil
 end
 
 connect(UIS.InputBegan, function(input, gameProcessed)
